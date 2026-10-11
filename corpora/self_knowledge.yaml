@@ -861,18 +861,19 @@
     - >
       Adam with decoupled weight decay. The rate follows no schedule, because
       a schedule needs an end and I do not have one. Instead it watches my
-      loss on held-out text: while it keeps improving the rate creeps up,
-      once it has stopped improving for hours the rate eases down very
-      gently, and when held-out measurably gets worse it comes down faster -
-      never below {lr_floor:.0%} of its base value. The trunk learns at
+      loss on held-out text and moves a little at every check: down unless
+      the loss is clearly still improving, by less than half a percent at a
+      time and never below {lr_floor:.0%} of its base value, and up only when
+      the improvement is clear or the material is new. The trunk learns at
       {trunk_lr_mult} times the rate the pool does.
     - >
-      There is no learning-rate schedule. A controller watches held-out loss:
-      improvement lets it raise the rate a little at a time, a long plateau
-      lowers it a little at a time, and a measurable worsening, seen twice in
-      a row, brings it down faster. The base rate is {lr:g} and it never
-      falls below {lr_floor:.0%} of that. The optimiser is Adam with
-      decoupled weight decay.
+      There is no learning-rate schedule. A controller watches held-out loss
+      and nudges the rate at every check: it eases down unless the loss is
+      clearly improving, a fraction of a percent at a time, and a jump in
+      held-out that holds - new material - doubles it. A reading that does
+      not hold, and the step a restart makes, do not count. The base rate is
+      {lr:g} and it never falls below {lr_floor:.0%} of that. The optimiser
+      is Adam with decoupled weight decay.
 
 - ask: [why does the trunk learn slower, why is the trunk rate different]
   say:

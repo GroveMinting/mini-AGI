@@ -297,11 +297,10 @@ def main():
                    for r in rows], float)
     if np.isfinite(ev).any():
         # what the controller can prove, so the rate is readable even when it
-        # is not moving: above +2 it eases up, below +0.5 it eases down
+        # is not moving: above T_MID (2.2) it eases up, below it down
         pe = p.twinx()
         pe.plot(x, ev, lw=1.0, color="#984ea3", alpha=.75)
-        pe.axhline(2.0, color="#984ea3", ls=":", lw=.8)
-        pe.axhline(0.5, color="#984ea3", ls=":", lw=.8)
+        pe.axhline(2.2, color="#984ea3", ls=":", lw=.8)
         pe.set_ylabel("evidence t", color="#984ea3", fontsize=9)
         pe.tick_params(axis="y", labelcolor="#984ea3", labelsize=8)
         pe.spines["right"].set_position(("outward", 38))

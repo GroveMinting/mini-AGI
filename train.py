@@ -1037,6 +1037,20 @@ def cmd_read(args):
     # There is no lr_origin any more and nothing counts characters: see
     # minagi/plasticity.py for the two rules and why they are symmetric.
     plast = Plasticity.restore((man or {}).get("plasticity"))
+    if ((man or {}).get("plasticity") and not plast.has_fits()
+            and args.sample_log and os.path.exists(args.sample_log)):
+        # A state with no fits - written by the controller that kept rotation
+        # levels instead - would sit blind for two hours of rounds. The sample
+        # log has the readings.
+        try:
+            with open(args.sample_log, errors="ignore") as f:
+                got = Plasticity.log_readings(f.read())
+            plast.seed(got)
+            print(f"  plasticity: fits seeded from the last "
+                  f"{sum(g is not None for g in got[-Plasticity.SEED:])} "
+                  f"held-out readings in {args.sample_log}", flush=True)
+        except OSError:
+            pass
     if args.lr_reset:
         plast.scale = 1.0
         print("  plasticity RESET: full learning rate restored", flush=True)
@@ -1737,7 +1751,7 @@ def write_samples(path, step, chars, minutes, samples, val=None, se=None,
                 f.write(f"   lr {lr:.2e}")
             if plast:
                 # What the rate controller can currently prove. t is the
-                # verdict: it eases the rate UP above T_MID (1.25) and down
+                # verdict: it eases the rate UP above T_MID (2.2) and down
                 # below it, so the number says which way it is leaning before
                 # the rate has moved. `effect` is the number the verdict is
                 # now built from - improvement per evaluation in units of the

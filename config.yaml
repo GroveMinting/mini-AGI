@@ -121,9 +121,9 @@ training:
                           # and the expert files stay fp32
 
   # THE LEARNING RATE IS NOT SCHEDULED. minagi/plasticity.py watches held-out
-  # and moves the rate in both directions: up while held-out improves, down
-  # when it measurably gets worse, gently down once it has stopped improving
-  # for hours, and back up when held-out jumps and stays there. The floor
+  # and nudges the rate at every check: down unless held-out is clearly
+  # improving, 0.4% at most at a time - on a plateau a tenth or less in six
+  # hours - and up only on clear improvement or new material. The floor
   # (x0.01 of lr) is in plasticity.py.
   chunk: 2048             # characters between steps within the window
   lr: 3.0e-4

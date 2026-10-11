@@ -144,6 +144,9 @@ def main():
     ev = col("evidence")
     for g in segs:
         q.plot(x[g], ev[g], lw=1, color="#9467bd")
+    # the controller's verdict against T_MID in minagi/plasticity.py: above
+    # it the rate eases up, below it down (the rows the plateau controller
+    # wrote on 10 October carry its improvement in sd here instead)
     at = 2.2
     q.axhline(at, color="#9467bd", ls="--", lw=.9, alpha=.7)
     q.text(x.max(), at, " raises above here", fontsize=7, color="#9467bd",
@@ -151,7 +154,7 @@ def main():
     q.set_ylabel("evidence t", color="#9467bd", fontsize=8)
     q.tick_params(labelsize=7)
     q.spines["top"].set_visible(False)
-    frame(ax, "Learning rate, and why", "the controller raises only on clear evidence")
+    frame(ax, "Learning rate, and why", "eased at every check unless held-out is clearly improving")
 
     # -------------------------------------------- 4. who does the work
     g_ = np.abs(np.asarray(tel.get("gate") or [], float))
