@@ -1,0 +1,72 @@
+From 92e0be8e7b8742fa39020d0fa36033fa2374aa3f Mon Sep 17 00:00:00 2001
+From: 10xCrazyHorse <10xCrazyHorse@gmail.com>
+Date: Thu, 8 Oct 2026 10:15:00 -0400
+Subject: [PATCH 5/8] GradSNR.ratio: drop the bias correction
+
+Both averages start at the first reading, not at zero, so dividing by
+1 - beta^n only inflated the ratio: 6.7x at the eighth reading, and a
+constant gradient read above one. Reported only, nothing steers on it.
+
+(cherry picked from commit f777c143102645e6cd4724a80ca14b7971135af8)
+---
+ minagi/optim.py       |  7 +++++--
+ tests/test_gradsnr.py | 35 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 2 deletions(-)
+ create mode 100644 tests/test_gradsnr.py
+
+diff --git a/minagi/optim.py b/minagi/optim.py
+index bdf47b7..22466a0 100644
+--- a/minagi/optim.py
++++ b/minagi/optim.py
+@@ -59,5 +59,8 @@ class GradSNR:
+         """0 = pure noise, 1 = every step pointing the same way."""
+         if self.m is None or self.sq <= 0 or self.n < 8:
+             return None
+-        c = 1 - self.beta ** self.n                  # bias correction
+-        return float((self.m / c).pow(2).sum() / (self.sq / c))
++        # No bias correction: both averages start at the first reading, not
++        # at zero, so neither is biased toward zero. Dividing by 1 - beta^n
++        # here inflated the ratio by that factor - 6.7x at the eighth reading,
++        # and a constant gradient read above one.
++        return float(self.m.pow(2).sum() / self.sq)
+diff --git a/tests/test_gradsnr.py b/tests/test_gradsnr.py
+new file mode 100644
+index 0000000..f361859
+--- /dev/null
++++ b/tests/test_gradsnr.py
+@@ -0,0 +1,35 @@
++"""GradSNR.ratio: no bias correction on averages that start at the first reading.
++
++Ported from 10xCrazyHorse's pytest suite on PR #28 to the repo's unittest runner.
++"""
++
++import unittest
++
++import torch
++
++from minagi.optim import GradSNR
++
++
++class GradSNRRatioTest(unittest.TestCase):
++    def test_constant_gradient_reads_one(self):
++        a = torch.nn.Parameter(torch.zeros(4))
++        snr = GradSNR()
++        for n in range(1, 401):
++            a.grad = torch.full((4,), 0.5)
++            r = snr.observe([a])
++            if n >= 8:                    # from the first reading, not only late
++                self.assertLess(abs(r - 1.0), 1e-5, (n, r))
++
++    def test_noise_reads_below_one_early(self):
++        torch.manual_seed(0)
++        a = torch.nn.Parameter(torch.zeros(256))
++        snr = GradSNR()
++        for _ in range(8):
++            a.grad = torch.randn(256)
++            r = snr.observe([a])
++        self.assertGreaterEqual(r, 0.0)
++        self.assertLess(r, 1.0)
++
++
++if __name__ == "__main__":
++    unittest.main()

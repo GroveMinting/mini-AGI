@@ -1,0 +1,117 @@
+From c19a4abc73f576f691259bf72575b2b6da82509d Mon Sep 17 00:00:00 2001
+From: Helios <11094129+GroveMinting@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 22:53:11 -0400
+Subject: [PATCH 6/8] Load a never-saved weights directory through the paging
+ path
+
+Reported as issue #17 by eletec: serve.py crashed at startup calling
+pool.vram_params() on a weights directory written by create() or a
+save-less read. _load_dir took the paging path only when the manifest
+carried "paged": true, a flag first written on a paged save, so a
+directory that already had the on-disk expert layout loaded into the
+in-memory SharedPool, which has no vram_params.
+
+_load_dir now prefers the paging path when experts/ is on disk, and
+serve.py's banner guards the call: an in-memory pool holds everything on
+the card, so its resident size is its total.
+
+Authored here from the report; upstream has no PR for #17.
+
+Co-authored-by: eletec <46861893+eletec@users.noreply.github.com>
+---
+ minagi/recur.py          | 10 ++++++++-
+ serve.py                 |  7 ++++++-
+ tests/test_paged_load.py | 44 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 59 insertions(+), 2 deletions(-)
+ create mode 100644 tests/test_paged_load.py
+
+diff --git a/minagi/recur.py b/minagi/recur.py
+index beda5ef..489bfd3 100644
+--- a/minagi/recur.py
++++ b/minagi/recur.py
+@@ -503,7 +503,15 @@ def _load_dir(path, device, paged=None, read_only=False):
+     with open(os.path.join(path, "manifest.json")) as f:
+         man = json.load(f)
+     if paged is None:
+-        paged = bool(man.get("paged"))
++        # A directory created but never saved by a paged pool carries the
++        # on-disk expert layout (one file per expert under experts/) without a
++        # `paged` flag in the manifest - that flag is only written on the first
++        # paged save. Prefer the paging path when the layout is on disk, so
++        # such a directory loads as a PagedPool instead of materialising every
++        # expert into memory (and so serve.py's banner has a pool that can be
++        # asked for its resident size).
++        paged = (bool(man.get("paged"))
++                 or os.path.isdir(os.path.join(path, "experts")))
+     if paged:
+         # build_paged lives in train.py; a caller in another directory (the
+         # film's captures run from video/) needs the repo root on the path
+diff --git a/serve.py b/serve.py
+index b34c406..7c583ba 100644
+--- a/serve.py
++++ b/serve.py
+@@ -890,8 +890,13 @@ def main():
+         # Both numbers are the POOL. Comparing model.n_params(), which counts
+         # the trunk plus whatever is resident, against the pool total reads as
+         # the card holding more than the model has.
++        #
++        # An in-memory SharedPool has no `vram_params`: everything it holds is
++        # on the card, so its resident size is its whole size.
++        vram = (pool.vram_params() if hasattr(pool, "vram_params")
++                else pool.n_params())
+         print(f"  {pool.n_experts()} experts, "
+-              f"{pool.vram_params() / 1e6:.1f}M of {pool.n_params() / 1e6:.1f}M "
++              f"{vram / 1e6:.1f}M of {pool.n_params() / 1e6:.1f}M "
+               f"on the card, context {model.cfg.block:,}")
+     else:
+         print(f"  {model.n_params() / 1e6:.1f}M parameters, "
+diff --git a/tests/test_paged_load.py b/tests/test_paged_load.py
+new file mode 100644
+index 0000000..c85a09c
+--- /dev/null
++++ b/tests/test_paged_load.py
+@@ -0,0 +1,44 @@
++"""A weights directory that was created but never paged-saved still has the
++on-disk expert layout. It must load through the paging path, not in memory.
++
++Reported as issue #17 by eletec: serve.py's startup banner crashed calling
++`pool.vram_params()` on the in-memory SharedPool such a directory loaded into.
++"""
++
++import os
++import tempfile
++import unittest
++
++import torch
++
++from minagi import recur
++from minagi.create import create
++from minagi.paged import PagedPool
++
++
++def _create_tiny(path):
++    create(path, verbose=False, experts=3, resident=1, d_ff=8, depth=1,
++           d_model=8, trunk_d_ff=16, n_head=1, block=16, max_steps=1,
++           top_k=1)
++
++
++class PagedLoadTest(unittest.TestCase):
++    def test_never_saved_dir_loads_through_the_paging_path(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            w = os.path.join(tmp, "weights")
++            _create_tiny(w)
++            self.assertTrue(os.path.isdir(os.path.join(w, "experts")),
++                            "create() must leave the expert layout on disk")
++
++            model, _meta = recur._load_dir(w, torch.device("cpu"),
++                                           read_only=True)
++
++            self.assertIsInstance(model.pool, PagedPool)
++            # the banner asks for these; a SharedPool has n_experts/n_params
++            # but no vram_params, which is what used to crash serve.py
++            self.assertTrue(hasattr(model.pool, "vram_params"))
++            self.assertEqual(model.pool.n_experts(), 3)
++
++
++if __name__ == "__main__":
++    unittest.main()

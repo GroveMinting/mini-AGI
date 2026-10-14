@@ -1,0 +1,523 @@
+From 9be4932e642e81a4a79eeaa13f1172b9426a00d4 Mon Sep 17 00:00:00 2001
+From: Helios <11094129+GroveMinting@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 11:11:09 -0400
+Subject: [PATCH 1/8] Keep dry reads off source weights
+
+(cherry picked from commit a9214b6813c03ed170f6e49907b35757bfaee455)
+---
+ README.md                  |   2 +-
+ minagi/paged.py            |  39 +++++--
+ minagi/store.py            |  40 +++++++
+ tests/test_store_shadow.py | 226 +++++++++++++++++++++++++++++++++++++
+ train.py                   |  48 ++++++--
+ 5 files changed, 331 insertions(+), 24 deletions(-)
+ create mode 100644 tests/test_store_shadow.py
+
+diff --git a/README.md b/README.md
+index 81e2dbd..4c29917 100644
+--- a/README.md
++++ b/README.md
+@@ -351,7 +351,7 @@ It is the same path training uses: same chunking, same cache, same gradient step
+ | `--lr` | default 5e-5, below a training run: reading should adjust the model, not overwrite it |
+ | `--mix ""` | skip the before/after scoring |
+ 
+-Two defaults worth knowing. **Nothing is saved without `--save`**, so a read is a dry run until you decide otherwise. And it scores the held-out mixture before and after, then says plainly if reading your files cost the model ground elsewhere.
++Two defaults worth knowing. **Nothing is saved without `--save`**, so a read is a dry run until you decide otherwise. Dry reads send changed expert files to a temporary overlay, so eviction cannot write part of the in-memory update back to the real model. And it scores the held-out mixture before and after, then says plainly if reading your files cost the model ground elsewhere.
+ 
+ ## Benchmarks
+ 
+diff --git a/minagi/paged.py b/minagi/paged.py
+index 6b2fbdc..03e007f 100644
+--- a/minagi/paged.py
++++ b/minagi/paged.py
+@@ -184,8 +184,9 @@ class Tiers:
+     """
+ 
+     def __init__(self, path, d_model, d_ff, ram_capacity=256, device="cpu",
+-                 read_only=False):
++                 read_only=False, write_path=None):
+         self.path = path
++        self.write_path = write_path or path
+         self.d_model, self.d_ff = d_model, d_ff
+         self.ram = OrderedDict()             # id -> dict of CPU tensors
+         self.ram_capacity = ram_capacity
+@@ -200,7 +201,25 @@ class Tiers:
+         self.reads = self.hits = self.evictions = self.writebacks = 0
+ 
+     def _file(self, i):
+-        return os.path.join(self.path, "e%05d.npz" % i)
++        name = "e%05d.npz" % i
++        if self.write_path != self.path:
++            changed = os.path.join(self.write_path, name)
++            if os.path.exists(changed):
++                return changed
++        return os.path.join(self.path, name)
++
++    def _write_file(self, i):
++        return os.path.join(self.write_path, "e%05d.npz" % i)
++
++    def delete(self, i):
++        """Delete an expert only from the writable layer."""
++        if self.read_only:
++            raise RuntimeError("read-only pool tried to delete e%05d.npz" % i)
++        f = self._write_file(i)
++        if os.path.exists(f):
++            os.remove(f)
++        self.ram.pop(i, None)
++        self.dirty.discard(i)
+ 
+     def _from_disk(self, i):
+         """
+@@ -268,9 +287,11 @@ class Tiers:
+         # measurement for both.
+         arrays = {k: (pack_bf16(v) if is_moment(k) else v.to(torch.float32).numpy())
+                   for k, v in ent.items() if torch.is_tensor(v)}
+-        tmp = self._file(i) + ".tmp.npz"
++        os.makedirs(self.write_path, exist_ok=True)
++        target = self._write_file(i)
++        tmp = target + ".tmp.npz"
+         np.savez(tmp, **arrays)
+-        os.replace(tmp, self._file(i))
++        os.replace(tmp, target)
+         self.writebacks += 1
+ 
+     def flush(self):
+@@ -304,7 +325,7 @@ class PagedPool(nn.Module):
+ 
+     def __init__(self, path, d_model, d_ff, n_experts, resident=16,
+                  ram_capacity=256, device="cpu", max_experts=1_000_000,
+-                 read_only=False):
++                 read_only=False, write_path=None):
+         super().__init__()
+         self.path = path
+         self.d_model, self.d_ff = d_model, d_ff
+@@ -313,7 +334,7 @@ class PagedPool(nn.Module):
+         self._n = n_experts
+         self.read_only = read_only
+         self.tiers = Tiers(path, d_model, d_ff, ram_capacity, device,
+-                           read_only=read_only)
++                           read_only=read_only, write_path=write_path)
+ 
+         # the VRAM slots - fixed in number, their contents swapped
+         self.w1 = nn.Parameter(torch.zeros(self.resident, d_ff, d_model))
+@@ -1138,11 +1159,7 @@ class PagedPool(nn.Module):
+         for i in range(self._n):
+             if i not in kept:
+                 u = self._f(i)
+-                f = self.tiers._file(u)
+-                if os.path.exists(f):
+-                    os.remove(f)
+-                self.tiers.ram.pop(u, None)
+-                self.tiers.dirty.discard(u)
++                self.tiers.delete(u)
+ 
+         idx = torch.tensor(keep, dtype=torch.long, device=self.gate.device)
+         opt = getattr(self, "_opt", None)
+diff --git a/minagi/store.py b/minagi/store.py
+index 50fb9dc..6d0b72a 100644
+--- a/minagi/store.py
++++ b/minagi/store.py
+@@ -31,6 +31,7 @@ interrupted save cannot leave a half-written weight behind.
+ import json
+ import os
+ import sys
++import tempfile
+ 
+ import numpy as np
+ import torch
+@@ -40,6 +41,42 @@ from .precision import pack_bf16, unpack_bf16
+ CORE, ROUTERS, EXPERTS, OPTIM = "core", "routers", "experts", "optim"
+ 
+ 
++class WeightShadow:
++    """Temporary storage for a dry read's model or changed experts."""
++
++    def __init__(self, source):
++        source = os.path.abspath(source)
++        parent = os.path.dirname(source)
++        while not os.path.isdir(parent):
++            above = os.path.dirname(parent)
++            if above == parent:
++                parent = None
++                break
++            parent = above
++        try:
++            self._tmp = tempfile.TemporaryDirectory(
++                prefix=".minagi-dry-", dir=parent,
++                ignore_cleanup_errors=True)
++        except OSError:
++            self._tmp = tempfile.TemporaryDirectory(
++                prefix="minagi-dry-", ignore_cleanup_errors=True)
++        self.path = os.path.join(self._tmp.name, "weights")
++
++    def cleanup(self):
++        self._tmp.cleanup()
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc, tb):
++        self.cleanup()
++
++
++def shadow(path):
++    """Return temporary storage for a dry read of a weights directory."""
++    return WeightShadow(path)
++
++
+ def _is_expert(key):
+     return ".experts." in key and key.startswith("pool.")
+ 
+@@ -179,6 +216,9 @@ def _save_paged(model, pool, path, step, val, opt, cfg, verbose, extra=None):
+     resident - with its optimiser moments - and writing the manifest around
+     what is there. Nothing is gathered and nothing is deleted.
+     """
++    if os.path.abspath(pool.tiers.write_path) != os.path.abspath(pool.tiers.path):
++        raise RuntimeError(
++            "cannot checkpoint a pool with a temporary expert overlay")
+     pool.flush()
+     core, routers = {}, {}
+     for k, v in model.state_dict().items():
+diff --git a/tests/test_store_shadow.py b/tests/test_store_shadow.py
+new file mode 100644
+index 0000000..a1a166e
+--- /dev/null
++++ b/tests/test_store_shadow.py
+@@ -0,0 +1,226 @@
++import contextlib
++import hashlib
++import io
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++from unittest import mock
++
++import torch
++
++import train
++from minagi import store
++from minagi.create import create
++from train import build_paged
++
++
++def _digest_tree(path):
++    digest = hashlib.sha256()
++    for root, dirs, files in os.walk(path):
++        dirs.sort()
++        for name in sorted(files):
++            file_path = os.path.join(root, name)
++            digest.update(os.path.relpath(file_path, path).encode())
++            with open(file_path, "rb") as f:
++                for chunk in iter(lambda: f.read(65536), b""):
++                    digest.update(chunk)
++    return digest.hexdigest()
++
++
++def _metadata_tree(path):
++    out = {}
++    for root, dirs, files in os.walk(path):
++        dirs.sort()
++        for name in sorted(dirs + files):
++            item = os.path.join(root, name)
++            stat = os.stat(item)
++            out[os.path.relpath(item, path)] = (
++                stat.st_mode, stat.st_nlink, stat.st_size,
++                stat.st_mtime_ns, stat.st_ctime_ns)
++    return out
++
++
++def _make_writable(path):
++    for root, _, files in os.walk(path):
++        os.chmod(root, 0o700)
++        for name in files:
++            os.chmod(os.path.join(root, name), 0o600)
++
++
++def _make_read_only(path):
++    for root, _, files in os.walk(path, topdown=False):
++        for name in files:
++            os.chmod(os.path.join(root, name), 0o400)
++        os.chmod(root, 0o500)
++
++
++def _create_tiny(path, block=16):
++    create(path, verbose=False, experts=3, resident=1, d_ff=8, depth=1,
++           d_model=8, trunk_d_ff=16, n_head=1, block=block, max_steps=1,
++           top_k=1)
++
++
++def _admit(pool, idx):
++    """Force one expert onto the card through the current admission API.
++
++    begin_text starts a fresh text, so the vote that admits experts is only
++    this call's mass. select_temperature is 0 for the tiny models these tests
++    build, so admit takes the top-mass experts deterministically; with
++    resident=1 that is the single expert named here, which evicts whatever the
++    one slot held before.
++    """
++    mass = torch.zeros(pool.n_experts())
++    mass[idx] = 1.0
++    pool.begin_text()
++    pool.admit(mass)
++
++
++def _read_args(text, source):
++    return [
++        "--device", "cpu", "read", text,
++        "--weights-dir", source,
++        "--chunk", "8",
++        "--context-start", "64",
++        "--context-end", "64",
++        "--resident", "1",
++        "--ram-capacity", "1",
++        "--passage", "64",
++        "--grow-k", "0",
++        "--held-out", "",
++        "--history", "",
++        "--precision", "fp32",
++        "--train-steps-mean", "0",
++        "--save-every", "0",
++        "--no-plots",
++    ]
++
++
++class WeightShadowTest(unittest.TestCase):
++    def test_dirty_expert_survives_eviction_without_changing_source(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            source = os.path.join(tmp, "weights")
++            _create_tiny(source)
++            _make_read_only(source)
++            before = _digest_tree(source)
++            metadata = _metadata_tree(source)
++
++            shadow = store.shadow(source)
++            try:
++                model, _, pool, _ = build_paged(
++                    source, torch.device("cpu"), resident=1,
++                    ram_capacity=1, ceiling=16,
++                    expert_write_path=os.path.join(shadow.path, "experts"))
++                # expert 0 onto the card, so the one slot holds it
++                _admit(pool, 0)
++                opt = torch.optim.AdamW([pool.w1, pool.w3, pool.w2])
++                expected_moments = []
++                for i, param in enumerate((pool.w1, pool.w3, pool.w2), 1):
++                    state = opt.state[param]
++                    state["step"] = torch.tensor(1.0)
++                    # Binary fractions survive the intentional bf16 moment
++                    # packing exactly, so equality tests paging rather than
++                    # storage quantisation.
++                    state["exp_avg"] = torch.full_like(param, i / 4)
++                    state["exp_avg_sq"] = torch.full_like(param, i / 8)
++                    expected_moments.append((state["exp_avg"].clone(),
++                                             state["exp_avg_sq"].clone()))
++                pool.attach_optimiser(opt)
++                # The step marker makes the slot's moments the expert's own, so
++                # eviction writes them beside its weights. (Moments otherwise
++                # travel only at a step, by design: a load while a reply is
++                # written carries weights alone.)
++                pool._count_step()
++                with torch.no_grad():
++                    pool.w1.add_(1.0)
++                expected = pool.w1.detach().clone()
++
++                # A RAM cache of one forces expert 0 through a shadow writeback
++                # before it is requested again.
++                _admit(pool, 1)
++                _admit(pool, 2)
++                _admit(pool, 0)
++                # What a step does before using the moments: an arriving expert
++                # brings weights alone, so its own are restored here from the
++                # overlay.
++                pool._own_moments()
++
++                self.assertTrue(torch.equal(pool.w1, expected))
++                for param, (avg, avg_sq) in zip(
++                        (pool.w1, pool.w3, pool.w2), expected_moments):
++                    self.assertTrue(torch.equal(opt.state[param]["exp_avg"], avg))
++                    self.assertTrue(torch.equal(
++                        opt.state[param]["exp_avg_sq"], avg_sq))
++                self.assertTrue(os.path.exists(os.path.join(
++                    shadow.path, "experts", "e00000.npz")))
++                pool.tiers.delete(1)
++                self.assertTrue(os.path.exists(os.path.join(
++                    source, "experts", "e00001.npz")))
++                with self.assertRaisesRegex(RuntimeError, "temporary expert overlay"):
++                    store.save(model, source)
++                self.assertEqual(_digest_tree(source), before)
++                self.assertEqual(_metadata_tree(source), metadata)
++                del model, pool
++            finally:
++                shadow.cleanup()
++                _make_writable(source)
++
++    def test_fresh_dry_model_exists_only_in_shadow(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            source = os.path.join(tmp, "weights")
++            shadow = store.shadow(source)
++            shadow_root = os.path.dirname(shadow.path)
++            try:
++                _create_tiny(shadow.path)
++                self.assertTrue(os.path.exists(
++                    os.path.join(shadow.path, "core.npz")))
++                self.assertFalse(os.path.exists(source))
++            finally:
++                shadow.cleanup()
++            self.assertFalse(os.path.exists(shadow_root))
++
++    def test_read_command_leaves_existing_weights_unchanged(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            source = os.path.join(tmp, "weights")
++            text = os.path.join(tmp, "input.txt")
++            _create_tiny(source, block=64)
++            with open(text, "w") as f:
++                f.write("abcdefgh" * 12)
++            before = _digest_tree(source)
++            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++
++            proc = subprocess.run(
++                [sys.executable, "train.py"] + _read_args(text, source),
++                cwd=root, text=True, capture_output=True, timeout=60)
++
++            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
++            self.assertIn("temporary overlay", proc.stdout)
++            self.assertIn("not saved", proc.stdout)
++            self.assertEqual(_digest_tree(source), before)
++
++    def test_read_command_creates_fresh_model_only_in_shadow(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            source = os.path.join(tmp, "weights")
++            text = os.path.join(tmp, "input.txt")
++            with open(text, "w") as f:
++                f.write("abcdefgh" * 12)
++
++            def tiny_create(path, **_):
++                _create_tiny(path, block=64)
++
++            stdout = io.StringIO()
++            with mock.patch("minagi.create.create", side_effect=tiny_create), \
++                    mock.patch.object(sys, "argv",
++                                      ["train.py"] + _read_args(text, source)), \
++                    contextlib.redirect_stdout(stdout):
++                with self.assertRaises(SystemExit) as stopped:
++                    train.main()
++
++            self.assertEqual(stopped.exception.code, 0)
++            self.assertIn("temporary overlay", stdout.getvalue())
++            self.assertFalse(os.path.exists(source))
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/train.py b/train.py
+index bb68688..ce08285 100644
+--- a/train.py
++++ b/train.py
+@@ -591,6 +591,13 @@ def _truncate_history(path, chars):
+ 
+ 
+ def cmd_read(args):
++    if args.save:
++        return _cmd_read(args)
++    with weights_store.shadow(args.weights_dir) as dry_shadow:
++        return _cmd_read(args, dry_shadow)
++
++
++def _cmd_read(args, dry_shadow=None):
+     """
+     Point the model at files and let it read them.
+ 
+@@ -639,7 +646,18 @@ def cmd_read(args):
+     print(f"{info['files']} files, {info['characters']/1e6:.2f}M characters"
+           + (f", {args.passes} passes" if args.passes > 1 else ""))
+ 
+-    wdir = args.weights_dir
++    source_wdir = args.weights_dir
++    source_exists = os.path.exists(os.path.join(source_wdir, "core.npz"))
++    # A new dry model lives wholly in temporary storage. An existing model can
++    # load its immutable bundles in place; only changed expert files need a
++    # writable overlay.
++    wdir = source_wdir if source_exists or args.save else dry_shadow.path
++    expert_write_path = None
++    if not args.save:
++        expert_write_path = (os.path.join(dry_shadow.path, "experts")
++                             if source_exists else None)
++        print(f"  dry read: expert writes use a temporary overlay; "
++              f"{source_wdir} will not be modified")
+     # No model here yet is a model that has not been made yet, not an error.
+     # Everything about its shape is in config.yaml, so there is nothing to ask.
+     #
+@@ -649,27 +667,29 @@ def cmd_read(args):
+     # sent every new reader straight into a missing core.npz.
+     if not os.path.exists(os.path.join(wdir, "core.npz")):
+         from minagi.create import create
+-        leftovers = ([f for f in os.listdir(wdir) if f != "manifest.json"]
+-                     if os.path.isdir(wdir) else [])
++        leftovers = ([f for f in os.listdir(source_wdir)
++                      if f != "manifest.json"]
++                     if os.path.isdir(source_wdir) else [])
+         if leftovers:
+             # Something is in there, but not a model. Wiping it is not this
+             # function's decision to make.
+             raise SystemExit(
+-                f"{wdir} has no core.npz but is not empty: "
++                f"{source_wdir} has no core.npz but is not empty: "
+                 f"{', '.join(sorted(leftovers)[:6])}. That is a partial or "
+                 f"foreign weights directory - move it aside, or point "
+                 f"--weights-dir somewhere else, and it will be created.")
+-        if os.path.isdir(wdir):
+-            print(f"{wdir} holds only a manifest - creating a fresh model "
++        if os.path.isdir(source_wdir):
++            print(f"{source_wdir} holds only a manifest - creating a fresh model "
+                   f"from config.yaml (the manifest describes the released "
+                   f"model, not this one, and is replaced)")
+         else:
+-            print(f"{wdir} does not exist - creating a fresh model from "
++            print(f"{source_wdir} does not exist - creating a fresh model from "
+                   f"config.yaml")
+         create(wdir, force=True)
+         print()
+-    model, cfg, pool, man = build_paged(wdir, device, args.resident,
+-                                        args.ram_capacity, args.context)
++    model, cfg, pool, man = build_paged(
++        wdir, device, args.resident, args.ram_capacity, args.context,
++        expert_write_path=expert_write_path)
+     # the best held-out this run has seen, for the optional notifier below.
+     # Reads the manifest, so it cannot move above build_paged.
+     best_val = float(man.get("val") or float("inf"))
+@@ -1845,7 +1865,7 @@ def _split_trunk_pool(model):
+ 
+ 
+ def build_paged(wdir, device, resident=None, ram_capacity=256, ceiling=None,
+-                read_only=False):
++                read_only=False, expert_write_path=None):
+     """
+     Load the model with its pool on disk rather than in VRAM.
+ 
+@@ -1859,6 +1879,10 @@ def build_paged(wdir, device, resident=None, ram_capacity=256, ceiling=None,
+     tool that inspects a directory a training run may own - paging an expert in
+     marks it dirty whether or not anything touched it, so a plain read would
+     otherwise write expert files back under the run.
++
++    expert_write_path keeps reads backed by `wdir` while directing changed
++    expert files elsewhere. Dry training uses it to preserve paging semantics
++    without allowing eviction writeback into the source checkpoint.
+     """
+     from minagi.paged import PagedPool
+     with open(os.path.join(wdir, "manifest.json")) as f:
+@@ -1904,7 +1928,8 @@ def build_paged(wdir, device, resident=None, ram_capacity=256, ceiling=None,
+     pool = PagedPool(os.path.join(wdir, "experts"), cfg.d_model, cfg.pool_d_ff,
+                      int(man["n_experts"]), resident=resident,
+                      ram_capacity=ram_capacity, device=device,
+-                     read_only=read_only).to(device)
++                     read_only=read_only,
++                     write_path=expert_write_path).to(device)
+     for m in model.modules():
+         if isinstance(m, PooledMLP):
+             m._pool[0] = pool
+@@ -2319,4 +2344,3 @@ def main():
+ 
+ if __name__ == "__main__":
+     main()
+-
