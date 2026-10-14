@@ -96,7 +96,8 @@ def describe(dev):
           + (f", CUDA {torch.version.cuda}" if torch.version.cuda else ""))
     if dev.type == "cuda":
         p = torch.cuda.get_device_properties(dev)
-        arch = getattr(p, "gcnArchName", "") or f"sm_{p.major}{p.minor}"
+        arch = ((getattr(p, "gcnArchName", "") or "").split(":")[0]
+                if torch.version.hip else f"sm_{p.major}{p.minor}")
         free, total = torch.cuda.mem_get_info(dev)
         print(f"  {p.name}, {arch}, {total / 2**30:.1f} GiB ({free / 2**30:.1f} free)")
     else:

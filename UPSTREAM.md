@@ -22,12 +22,15 @@ commit; see the bottom of [`HARDENING.md`](HARDENING.md).
 
 | Ref | What it is |
 |-----|------------|
-| `main` (default) | Upstream `main` **plus** the hardening patches. This is what you clone and run. |
+| `main` (default) | `hardening` **plus** the mirror scaffolding (docs, Makefile, sync script, CI). This is what you clone and run. |
+| `hardening` | Upstream `main` **plus** the hardening patches, one commit per fix. Rebased onto `upstream` on every sync. |
 | `upstream` | A pure mirror of `volotat/mini-AGI` `main`, fast-forward only. Never edited. |
 | tags `upstream-YYYYMMDD` | Sync checkpoints of the mirror. |
 
-The patches are the commits on `main` above `upstream`, one per fix, listed in
-[`HARDENING.md`](HARDENING.md) with their upstream issue and PR.
+The patches are the commits on `hardening` above `upstream`, one per fix, listed
+in [`HARDENING.md`](HARDENING.md) with their upstream issue and PR. The exported
+series in `patches/` is formatted from `upstream..hardening`, so it never
+includes the mirror scaffolding; regenerate it with `make patches`.
 
 ## Syncing upstream (on demand)
 

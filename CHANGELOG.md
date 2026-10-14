@@ -5,6 +5,55 @@ Notable changes to **this hardening mirror**. It tracks
 are not listed here — see [`UPSTREAM.md`](UPSTREAM.md) for the synced commit.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.1.2-mirror] — 2026-10-14
+
+GPU bring-up on an NVIDIA Blackwell card, and the first end-to-end verification
+of the fixed paths outside the unit tests.
+
+### Added
+
+- `scripts/smoke.py` + `make smoke` — tiny `create` → short `read --save` →
+  `serve.py` → one request, all in a temp directory. Exercises the paths
+  patches 0001/0004/0006 touch, on a chosen device. Nothing touches `weights/`
+  or `data/`.
+- `tests/test_gpu_paging.py` — CUDA-gated tests (`skipUnless`): a
+  never-saved directory loads paged, a forward/backward reaches the resident
+  experts, and a save-less read leaves the source weights byte-identical. The
+  CPU CI suite skips them; `make test-gpu` runs them on a card.
+- `make test-gpu`.
+
+### Fixed
+
+- `tools/device_check.py` printed the device name twice on NVIDIA: it read
+  `gcnArchName` unconditionally, but torch ≥ 2.11 exposes that attribute on CUDA
+  too (holding the marketing name). It is now used only on HIP builds; CUDA
+  reports `sm_<major><minor>` again.
+- `make patches` exported from `HEAD`, which would fold the mirror scaffolding
+  into the patch series; it now exports `upstream..hardening`.
+
+### Changed
+
+- Restored `HARDENING.md` and `HANDOFF.md`, rewritten without machine-specific
+  session or endpoint details.
+- `UPSTREAM.md` now documents the `hardening` branch (upstream + patches) that
+  `main` (upstream + patches + scaffolding) is built from.
+
+### Recorded
+
+- Upstream `ce31731` independently fixes **#30** (boundary-safe text probe), so
+  patch **0007** is superseded and will be dropped on the next sync;
+  `tests/test_text_probe.py` is kept as a regression test. The other seven
+  patches still apply to `ce31731`.
+
+### Measured
+
+- RTX 5080 Laptop (Blackwell, `sm_120`, 16 GB), torch 2.11.0+cu128, driver
+  610.53: `tools/device_check.py` uses the fused SDPA kernel for both the
+  4,096-window and cached-chunk cases, computes bf16 natively, and reads at
+  **1,313 char/s bf16** (819 char/s fp32) for a 4,096-character window at chunk
+  2,048, peaking at 3.66 GB (5.73 GB fp32). The full suite is 32 tests green
+  (29 CPU + 3 GPU).
+
 ## [v0.1.1-mirror] — 2026-10-14
 
 Fixes a crash introduced by patch 0007 in v0.1.0.

@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup setup-corpora test sync patches run serve clean
+.PHONY: help setup setup-corpora test test-gpu smoke sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -22,12 +22,18 @@ setup-corpora: ## extra deps for the corpus builders (Hugging Face, chess)
 test: ## run the CPU test suite
 	$(PY) -m unittest discover -s tests
 
+test-gpu: ## run the test suite including CUDA-gated integration tests
+	$(PY) -m unittest discover -s tests -v
+
+smoke: ## end-to-end: tiny create -> read --save -> serve -> one request
+	$(PY) scripts/smoke.py $(ARGS)
+
 sync: ## fetch upstream, rebase the patchset, re-export patches, run tests
 	scripts/sync-upstream.sh
 
-patches: ## re-export the patch series from the current branch
+patches: ## re-export the patch series from the hardening branch
 	rm -f patches/*.patch
-	git format-patch --no-signature -o patches upstream..HEAD
+	git format-patch --no-signature -o patches upstream..hardening
 	ls -1 patches
 
 run: ## read a corpus into weights/ (override with ARGS=...)
