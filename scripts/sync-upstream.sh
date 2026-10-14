@@ -89,4 +89,5 @@ fi
 echo
 echo "OK: rebased onto upstream main and the tests pass."
 echo "Review 'git log --oneline upstream..$hardening', then push with:"
-echo "    git push $push_remote $hardening $main_branch"
+echo "    git push $push_remote $hardening"
+echo "    git push --force-with-lease $push_remote $main_branch   # the scaffolding commit is rebased each sync"
