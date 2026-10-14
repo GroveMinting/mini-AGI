@@ -11,6 +11,13 @@ It is not affiliated with, endorsed by, or a replacement for upstream. Model
 architecture, training, benchmarks and the continual-learning results are
 upstream's work — go there for those, and open model/training issues there.
 
+## Synced to
+
+`volotat/mini-AGI` at commit
+[`60f7ae3`](https://github.com/volotat/mini-AGI/commit/60f7ae318cd54f6ed2995335de870107a04d74d4)
+(mirror tag `upstream-20261014`). The exported `patches/` apply to exactly this
+commit; see the bottom of [`HARDENING.md`](HARDENING.md).
+
 ## Branch model
 
 | Ref | What it is |

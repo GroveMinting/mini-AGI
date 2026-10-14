@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup test sync patches run serve clean
+.PHONY: help setup setup-corpora test sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -12,9 +12,12 @@ help:
 setup: ## create the venv and install deps (CPU torch, enough for the tests)
 	python3 -m venv $(VENV)
 	$(VENV)/bin/python -m pip install -q -U pip
-	$(VENV)/bin/python -m pip install -q numpy pyyaml
+	$(VENV)/bin/python -m pip install -q -r requirements.txt
 	$(VENV)/bin/python -m pip install -q torch --index-url https://download.pytorch.org/whl/cpu
-	@echo "For GPU training, install the CUDA/ROCm torch build into $(VENV)."
+	@echo "For GPU training, install the CUDA/ROCm/torch build into $(VENV)."
+
+setup-corpora: ## extra deps for the corpus builders (Hugging Face, chess)
+	$(VENV)/bin/python -m pip install -q -r requirements-corpora.txt
 
 test: ## run the CPU test suite
 	$(PY) -m unittest discover -s tests

@@ -21,9 +21,11 @@ and recorded below.
 | 0005 | Load a never-saved dir through paging | [#17](https://github.com/volotat/mini-AGI/issues/17) | — | `tests/test_paged_load.py` |
 | 0006 | Boundary-safe text probe | [#30](https://github.com/volotat/mini-AGI/issues/30) | — | `tests/test_text_probe.py` |
 | 0007 | Drop GradSNR `ratio()` bias correction | [#28](https://github.com/volotat/mini-AGI/pull/28) | [#28](https://github.com/volotat/mini-AGI/pull/28) | `tests/test_gradsnr.py` |
+| 0008 | Auto-detect MPS as a first-class device | — | [#3](https://github.com/volotat/mini-AGI/pull/3) | `tests/test_device_autodetect.py` |
 
-Patches 0005 and 0006 have no upstream PR; they were authored here from the
-reports (credited in the commit trailers) and are this mirror's own upkeep.
+Patches 0005, 0006 and 0008 have no upstream PR merged; 0005 and 0006 were
+authored here from the reports (credited in the commit trailers), and 0008 is
+carried from PR #3. All three are this mirror's own upkeep.
 
 ### 0001 — dry reads must not touch the source checkpoint
 
@@ -97,6 +99,17 @@ first reported, so a constant gradient read above 1. The patch returns
 the progress line and nothing steers on it. From PR #28 (10xCrazyHorse); the test
 was ported from pytest to unittest.
 
+### 0008 — Apple Silicon should not silently train on the CPU
+
+`--device` defaulted to `"cuda" if torch.cuda.is_available() else "cpu"`, so on
+an Apple Silicon machine mini-AGI fell back to CPU even though MPS trains fine
+when passed explicitly — the user got no signal to pass it. The patch adds
+`_auto_device()`: CUDA first (the only backend that enables fused AdamW, bf16
+autocast and the VRAM telemetry), MPS the deliberate second choice, CPU the
+safety net. CUDA and CPU behaviour is byte-identical to the old inline default.
+From PR #3 (MetalstormHS); the ordering test stubs both availability probes so it
+runs without CUDA or MPS hardware.
+
 ## Upstream-covered (dropped)
 
 | Patch | Upstream issue | Upstream PR | Why dropped |
@@ -104,13 +117,21 @@ was ported from pytest to unittest.
 | Reset serving cache before RoPE rollover | [#8](https://github.com/volotat/mini-AGI/issues/8) | [#9](https://github.com/volotat/mini-AGI/pull/9) | Upstream's current `serve.py` rewrites this exact path — it re-reads the newest half-window from position 0 with explicit offsets instead of trimming the cache and rebasing the offset, which is what the patch did. Verified against upstream `main` at sync time; no longer needed. |
 | GradSNR: missing grad as zeros | [#19](https://github.com/volotat/mini-AGI/issues/19) | [#20](https://github.com/volotat/mini-AGI/pull/20) | Upstream already zero-fills a parameter that took no part in a step, and additionally resets the meter when the observed set changes shape. Verified against upstream `main` at sync time; no longer needed. |
 
+## Deliberately not carried
+
+| PR | Title | Why not |
+|----|-------|---------|
+| [#24](https://github.com/volotat/mini-AGI/pull/24) | Interop tool-loop + self-directed learning + governance ledger + health certificate | 24 commits that add features, not correctness fixes: a `<tool>` protocol and registry in `serve.py`, an off-by-default `--selfdir` channel that lets the model adjust LR/growth, a hashed receipt ledger, and a monotonicity "health certificate". Outside this mirror's scope (correctness patches upstream has not merged), it changes the generation loop and training controller rather than fixing a bug, and the upstream maintainer asked the author to justify it and signalled he may reject it. Left to evolve upstream. |
+
 ## Applying to a plain upstream checkout
 
-The exported series in [`patches/`](patches) applies to the upstream commit this
-mirror was last synced to:
+The exported series in [`patches/`](patches) applies to upstream
+`60f7ae318cd54f6ed2995335de870107a04d74d4` — the commit this mirror was last
+synced to (recorded in [`UPSTREAM.md`](UPSTREAM.md)):
 
 ```sh
 git clone https://github.com/volotat/mini-AGI
 cd mini-AGI
+git checkout 60f7ae318cd54f6ed2995335de870107a04d74d4
 git am /path/to/mini-AGI/patches/*.patch
 ```

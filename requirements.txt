@@ -1,0 +1,10 @@
+# Runtime dependencies for the mini-AGI hardening mirror (see HANDOFF.md).
+#
+# PyTorch is intentionally not pinned here: `make setup` installs the CPU wheel
+# (enough for the test suite), and a GPU box installs the CUDA/ROCm/ARM64 build
+# for its platform instead. See the upstream README's install section.
+numpy
+PyYAML
+flask
+requests
+matplotlib
