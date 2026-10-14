@@ -1,0 +1,333 @@
+From 315f6e7abd76c41cec446ef510e31c081ee505fa Mon Sep 17 00:00:00 2001
+From: Helios <11094129+GroveMinting@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 14:04:40 -0400
+Subject: [PATCH 2/8] Build dedicated self-knowledge corpus
+
+(cherry picked from commit ee3536382bca5ac444b90d8174587c2a3deccff0)
+---
+ corpora/build.py                    |  14 ++-
+ corpora/chat.py                     |  75 ++++++++++-----
+ corpora/expand.py                   |   1 +
+ tests/test_self_knowledge_corpus.py | 139 ++++++++++++++++++++++++++++
+ 4 files changed, 199 insertions(+), 30 deletions(-)
+ create mode 100644 tests/test_self_knowledge_corpus.py
+
+diff --git a/corpora/build.py b/corpora/build.py
+index b501bf9..5e391d8 100644
+--- a/corpora/build.py
++++ b/corpora/build.py
+@@ -114,8 +114,11 @@ def build_chess(_):
+     return _generated("chess", "chess")
+ 
+ 
+-def build_self_knowledge(_):
+-    return _generated("chat", "chat")
++def build_self_knowledge(limit):
++    extra = ["--out", "data_self_knowledge_char", "--self-only"]
++    if limit:
++        extra += ["--conversations", limit, "--val", max(1, limit // 100)]
++    return _generated("chat", "self-knowledge", *extra)
+ 
+ 
+ BUILDERS = {
+@@ -171,9 +174,10 @@ def main():
+             limit = a.limit
+         else:
+             limit = 0 if a.full else SAMPLED.get(name, 0)
+-        fn(limit)
+-        if not _has_files(where):
+-            print(f"!! {name} produced nothing - carrying on", file=sys.stderr)
++        rc = fn(limit)
++        if rc or not _has_files(where):
++            print(f"!! {name} failed or produced nothing - carrying on",
++                  file=sys.stderr)
+             failed.append(name)
+ 
+     print("\ncorpus:")
+diff --git a/corpora/chat.py b/corpora/chat.py
+index e569f9a..7ea0447 100644
+--- a/corpora/chat.py
++++ b/corpora/chat.py
+@@ -361,9 +361,11 @@ SELF_FROM_CODE = [
+     (["thanks", "thank you"], "You're welcome."),
+ ]
+ 
+-SELF = _load_self_knowledge() or SELF_FROM_CODE
++YAML_SELF = _load_self_knowledge()
++SELF = YAML_SELF or SELF_FROM_CODE
+ 
+ SEED = [(q, a.format(**_F)) for qs, a in SELF for q in qs]
++SELF_SEED = [(q, a.format(**_F)) for qs, a in YAML_SELF for q in qs]
+ 
+ 
+ def clean_doc(doc):
+@@ -451,8 +453,8 @@ def render_math_turn(rng):
+     return f"{U0}\n{q}\n{U1}\n{B0}\n{ans.strip()}\n{B1}\n"
+ 
+ 
+-def render_seed_turn(rng):
+-    q, a = rng.choice(SEED)
++def render_seed_turn(rng, seed=None):
++    q, a = rng.choice(SEED if seed is None else seed)
+     if rng.random() < 0.5:
+         q = q.capitalize() + ("?" if q.split()[0] in
+                               ("who", "what", "can", "do", "are", "how",
+@@ -480,36 +482,56 @@ def build_conversation(pairs, rng, max_turns=4):
+     return "".join(out) + "\n"
+ 
+ 
++def build_self_conversation(rng, max_turns=4):
++    """Stack only the model-description turns loaded from YAML."""
++    return "".join(render_seed_turn(rng, SELF_SEED)
++                   for _ in range(rng.randint(1, max_turns))) + "\n"
++
++
+ def main():
+     ap = argparse.ArgumentParser()
+-    # data_chat_char, because that is the name `corpora expand` looks for.
+-    # It was data_chat, so even a run that got past the tokenizer wrote where
+-    # nothing would read it.
+-    ap.add_argument("--out", default="data_chat_char")
++    ap.add_argument("--out", default=None)
+     ap.add_argument("--conversations", type=int, default=400000)
+     ap.add_argument("--val", type=int, default=4000)
+     ap.add_argument("--max-pairs", type=int, default=200000)
+     ap.add_argument("--seed", type=int, default=0)
++    ap.add_argument("--self-only", action="store_true",
++                    help="generate only YAML-backed model-description turns")
+     args = ap.parse_args()
++    args.out = args.out or ("data_self_knowledge_char" if args.self_only
++                            else "data_chat_char")
+ 
+     os.makedirs(args.out, exist_ok=True)
+-    print("harvesting docstring/implementation pairs from local Python ...")
+-    t0 = time.time()
+-    pairs = harvest(max_pairs=args.max_pairs)
+-    print(f"  {len(pairs):,} pairs in {time.time()-t0:.1f}s")
+-    if not pairs:
+-        print("no pairs harvested", file=sys.stderr)
+-        return 1
+-    print("\nexamples:")
+-    for p in pairs[:3]:
+-        print(f"  {p['name']}: {p['doc'][:70]}")
++    rng = random.Random(args.seed)
++    if args.self_only:
++        if not SELF_SEED:
++            print("self_knowledge.yaml has no usable question/answer pairs",
++                  file=sys.stderr)
++            return 1
++        pairs = []
++        def make_conversation():
++            return build_self_conversation(rng)
++        print(f"generating from {len(SELF_SEED):,} self-knowledge "
++              f"question/answer pairs")
++    else:
++        print("harvesting docstring/implementation pairs from local Python ...")
++        t0 = time.time()
++        pairs = harvest(max_pairs=args.max_pairs)
++        print(f"  {len(pairs):,} pairs in {time.time()-t0:.1f}s")
++        if not pairs:
++            print("no pairs harvested", file=sys.stderr)
++            return 1
++        print("\nexamples:")
++        for p in pairs[:3]:
++            print(f"  {p['name']}: {p['doc'][:70]}")
++        def make_conversation():
++            return build_conversation(pairs, rng)
+ 
+     from minagi.tokenizer import ByteTokenizer
+     tok = ByteTokenizer()
+ 
+-    rng = random.Random(args.seed)
+     print("\nsample conversation:")
+-    print(textwrap.indent(build_conversation(pairs, rng)[:600], "  "))
++    print(textwrap.indent(make_conversation()[:600], "  "))
+ 
+     for split, count in (("train", args.conversations), ("val", args.val)):
+         path = os.path.join(args.out, f"{split}.bin")
+@@ -517,7 +539,7 @@ def main():
+         with open(path, "wb") as f:
+             batch = []
+             for i in range(count):
+-                batch.append(build_conversation(pairs, rng))
++                batch.append(make_conversation())
+                 if len(batch) >= 2048:
+                     for enc in tok.encode_batch(batch):
+                         a = np.array(enc.ids, dtype=np.uint16)
+@@ -538,11 +560,14 @@ def main():
+         else:
+             va = total
+ 
+-    json.dump({"vocab_size": tok.get_vocab_size(), "train_tokens": tr,
+-               "val_tokens": va, "pairs": len(pairs),
+-               "tokenizer": "byte",
+-               "format": f"{U0}...{U1}{B0}...{B1}"},
+-              open(os.path.join(args.out, "meta.json"), "w"), indent=2)
++    meta = {"vocab_size": tok.get_vocab_size(), "train_tokens": tr,
++            "val_tokens": va,
++            "pairs": len(SELF_SEED) if args.self_only else len(pairs),
++            "self_only": args.self_only,
++            "tokenizer": "byte",
++            "format": f"{U0}...{U1}{B0}...{B1}"}
++    with open(os.path.join(args.out, "meta.json"), "w") as f:
++        json.dump(meta, f, indent=2)
+     print(f"wrote {args.out}/meta.json")
+     return 0
+ 
+diff --git a/corpora/expand.py b/corpora/expand.py
+index e8866f7..d4c202a 100644
+--- a/corpora/expand.py
++++ b/corpora/expand.py
+@@ -46,6 +46,7 @@ SOURCES = [
+     ("code", "data_char", ".py"),
+     ("arithmetic", "data_math_char", ".txt"),
+     ("chat", "data_chat_char", ".txt"),
++    ("self-knowledge", "data_self_knowledge_char", ".txt"),
+     ("chess", "data_chess_char", ".txt"),
+ ]
+ 
+diff --git a/tests/test_self_knowledge_corpus.py b/tests/test_self_knowledge_corpus.py
+new file mode 100644
+index 0000000..c026217
+--- /dev/null
++++ b/tests/test_self_knowledge_corpus.py
+@@ -0,0 +1,139 @@
++import contextlib
++import io
++import json
++import os
++import re
++import sys
++import tempfile
++import unittest
++from unittest import mock
++
++import numpy as np
++
++from corpora import build, chat, expand
++from minagi.tokenizer import ByteTokenizer
++
++
++def _decode_bin(path):
++    ids = np.fromfile(path, dtype=np.uint16)
++    return ByteTokenizer().decode(ids)
++
++
++class SelfKnowledgeCorpusTest(unittest.TestCase):
++    def test_default_chat_mode_still_harvests_code_pairs(self):
++        pair = {"name": "answer", "doc": "Return the test answer.",
++                "code": "def answer():\n    return 42"}
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "data_chat_char")
++            stdout = io.StringIO()
++            with mock.patch.object(chat, "harvest", return_value=[pair]) as harvest, \
++                    mock.patch.object(sys, "argv", [
++                        "chat.py", "--out", out, "--conversations", "2",
++                        "--val", "1", "--seed", "2",
++                    ]), contextlib.redirect_stdout(stdout):
++                self.assertEqual(chat.main(), 0)
++
++            harvest.assert_called_once()
++            self.assertTrue(os.path.exists(os.path.join(out, "train.bin")))
++            with open(os.path.join(out, "meta.json")) as f:
++                meta = json.load(f)
++            self.assertFalse(meta["self_only"])
++            self.assertEqual(meta["pairs"], 1)
++
++    def test_self_only_requires_yaml_pairs(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            stderr = io.StringIO()
++            with mock.patch.object(chat, "SELF_SEED", []), \
++                    mock.patch.object(chat, "harvest",
++                                      side_effect=AssertionError("harvest called")), \
++                    mock.patch.object(sys, "argv", [
++                        "chat.py", "--out", os.path.join(tmp, "corpus"),
++                        "--self-only", "--conversations", "1", "--val", "1",
++                    ]), contextlib.redirect_stderr(stderr):
++                self.assertEqual(chat.main(), 1)
++            self.assertIn("self_knowledge.yaml", stderr.getvalue())
++
++    def test_self_only_generation_expands_into_its_own_lane(self):
++        seed = [("what are you", "I am the test model."),
++                ("how do you route", "I route through test experts.")]
++        with tempfile.TemporaryDirectory() as tmp:
++            source = os.path.join(tmp, "data_self_knowledge_char")
++            out = os.path.join(tmp, "data")
++            stdout = io.StringIO()
++            with mock.patch.object(chat, "SELF_SEED", seed), \
++                    mock.patch.object(chat, "harvest",
++                                      side_effect=AssertionError("harvest called")), \
++                    mock.patch.object(sys, "argv", [
++                        "chat.py", "--out", source, "--self-only",
++                        "--conversations", "6", "--val", "2", "--seed", "3",
++                    ]), contextlib.redirect_stdout(stdout):
++                self.assertEqual(chat.main(), 0)
++
++            train = _decode_bin(os.path.join(source, "train.bin"))
++            turns = re.findall(
++                r"<user>\n.*?\n</user>\n<bot>\n(.*?)\n</bot>",
++                train, flags=re.DOTALL)
++            self.assertGreaterEqual(len(turns), 6)
++            self.assertTrue(all(answer in {a for _, a in seed}
++                                for answer in turns))
++            with open(os.path.join(source, "meta.json")) as f:
++                meta = json.load(f)
++            self.assertTrue(meta["self_only"])
++            self.assertEqual(meta["pairs"], len(seed))
++
++            with mock.patch.object(expand, "ROOT", tmp), \
++                    mock.patch.object(sys, "argv", [
++                        "expand.py", "--out", out, "--only", "self-knowledge",
++                        "--shard-chars", "10000",
++                    ]), contextlib.redirect_stdout(stdout):
++                self.assertEqual(expand.main(), 0)
++
++            train_dir = os.path.join(out, "train", "self-knowledge")
++            val_dir = os.path.join(out, "val", "self-knowledge")
++            self.assertTrue(os.listdir(train_dir))
++            self.assertTrue(os.listdir(val_dir))
++            first = os.path.join(train_dir, sorted(os.listdir(train_dir))[0])
++            with open(first) as f:
++                expanded = f.read()
++            self.assertIn("<user>", expanded)
++            self.assertIn("<bot>", expanded)
++            self.assertIn("test model", expanded)
++
++    def test_all_builder_targets_self_knowledge_source_and_destination(self):
++        with mock.patch.object(build, "_sub", side_effect=[0, 0]) as run:
++            self.assertEqual(build.build_self_knowledge(250), 0)
++
++        self.assertEqual(run.call_args_list, [
++            mock.call("chat", "--out", "data_self_knowledge_char",
++                      "--self-only", "--conversations", 250, "--val", 2),
++            mock.call("expand", "--only", "self-knowledge"),
++        ])
++        self.assertEqual(build.BUILDERS["self-knowledge"][1],
++                         "data/train/self-knowledge")
++
++    def test_failed_forced_rebuild_is_not_hidden_by_stale_output(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            destination = os.path.join(tmp, "data", "train", "self-knowledge")
++            os.makedirs(destination)
++            with open(os.path.join(destination, "stale.txt"), "w") as f:
++                f.write("old data")
++            builders = dict(build.BUILDERS)
++            builders["self-knowledge"] = (lambda _: 1, destination)
++
++            stdout = io.StringIO()
++            stderr = io.StringIO()
++            with mock.patch.object(build, "ROOT", tmp), \
++                    mock.patch.object(build, "BUILDERS", builders), \
++                    mock.patch.object(build.os, "chdir"), \
++                    mock.patch.dict(sys.modules, {"datasets": mock.Mock()}), \
++                    mock.patch.object(sys, "argv", [
++                        "build.py", "--only", "self-knowledge", "--force",
++                    ]), contextlib.redirect_stdout(stdout), \
++                    contextlib.redirect_stderr(stderr):
++                self.assertEqual(build.main(), 1)
++
++            self.assertIn("failed or produced nothing", stderr.getvalue())
++
++
++if __name__ == "__main__":
++    unittest.main()

@@ -1,0 +1,113 @@
+From 8ba26afa8f4681f99f74a6234fa066c3147b4409 Mon Sep 17 00:00:00 2001
+From: kevin9327 <5299031+kevin9327@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 16:38:44 +0900
+Subject: [PATCH 4/8] fix(stream): cap FileReader measure reads by rotary
+ context
+
+Evaluation used the full --chunk length from position 0. When chunk is
+larger than model.context_end, that walk past the rope tables and raises.
+Training already windows to context; measure now does the same.
+
+(cherry picked from commit fe830cd533aed437a126ce32323e1e873f349701)
+---
+ minagi/stream.py                          |  7 +++
+ tests/test_file_reader_measure_context.py | 68 +++++++++++++++++++++++
+ 2 files changed, 75 insertions(+)
+ create mode 100644 tests/test_file_reader_measure_context.py
+
+diff --git a/minagi/stream.py b/minagi/stream.py
+index 6a5a31c..80f1d38 100644
+--- a/minagi/stream.py
++++ b/minagi/stream.py
+@@ -307,10 +307,17 @@ class FileReader:
+ 
+         That factor is the difference between an evaluation that runs between
+         samples and one that costs more than the training it is measuring.
++
++        Cap each read by the remaining rotary table. Training already windows
++        to `context`; evaluation used to feed a full `chunk` from position 0,
++        which crashes when chunk > context (#18).
+         """
+         if self.caches is None or self.seen + n > self.context:
+             self.caches = self.model.empty_caches()
+             self.seen = 0
++        n = min(n, self.context - self.seen)
++        if n < 2:
++            return None
+         a = self.data[self.pos:self.pos + n + 1].astype(np.int64)
+         x = torch.from_numpy(a[:-1]).to(self.device).unsqueeze(0)
+         y = torch.from_numpy(a[1:]).to(self.device).unsqueeze(0)
+diff --git a/tests/test_file_reader_measure_context.py b/tests/test_file_reader_measure_context.py
+new file mode 100644
+index 0000000..4d95b65
+--- /dev/null
++++ b/tests/test_file_reader_measure_context.py
+@@ -0,0 +1,68 @@
++"""FileReader._measure must not feed more tokens than the rotary tables allow.
++
++Ported from kevin9327's pytest suite on PR #27 to the repo's unittest runner.
++"""
++
++import unittest
++
++import numpy as np
++import torch
++
++from minagi.precision import amp
++from minagi.recur import RecurCoder, RecurConfig
++from minagi.stream import FileReader
++
++
++def _tiny_model(block=16):
++    cfg = RecurConfig(
++        vocab_size=64,
++        d_model=32,
++        n_head=4,
++        d_ff=64,
++        n_prelude=1,
++        n_recur=1,
++        n_coda=1,
++        max_steps=1,
++        block=block,
++        use_pool=False,
++        tie_embeddings=True,
++    )
++    return RecurCoder(cfg).eval()
++
++
++class FileReaderMeasureContextTest(unittest.TestCase):
++    def test_measure_caps_chunk_to_context(self):
++        # File longer than chunk; chunk larger than the model's rotary table.
++        model = _tiny_model(block=16)
++        data = np.arange(80, dtype=np.uint8) % 60
++        reader = FileReader(model, data, "heldout", chunk=64, context=16,
++                            device=torch.device("cpu"))
++        loss = reader.step(learn=False)
++        self.assertIsNotNone(loss)
++        self.assertLessEqual(reader.pos, 16)
++        self.assertLessEqual(reader.seen, 16)
++
++    def test_measure_raises_on_main_without_cap(self):
++        """Document the old failure: an uncapped read past rope length raises."""
++        model = _tiny_model(block=16)
++        data = np.arange(80, dtype=np.uint8) % 60
++        reader = FileReader(model, data, "heldout", chunk=64, context=16,
++                            device=torch.device("cpu"))
++
++        def uncapped_measure(n):
++            if reader.caches is None or reader.seen + n > reader.context:
++                reader.caches = reader.model.empty_caches()
++                reader.seen = 0
++            a = reader.data[reader.pos:reader.pos + n + 1].astype(np.int64)
++            x = torch.from_numpy(a[:-1]).to(reader.device).unsqueeze(0)
++            y = torch.from_numpy(a[1:]).to(reader.device).unsqueeze(0)
++            with amp(reader.device):
++                return reader.model(x, y, caches=reader.caches,
++                                    pos_offset=reader.seen)
++
++        with self.assertRaisesRegex(ValueError, "rotary tables"):
++            uncapped_measure(64)
++
++
++if __name__ == "__main__":
++    unittest.main()

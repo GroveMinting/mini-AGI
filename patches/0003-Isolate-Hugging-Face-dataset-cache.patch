@@ -1,0 +1,362 @@
+From 5e0c784aa0a2fa59ebd45eb83631f6c2be4a678b Mon Sep 17 00:00:00 2001
+From: Helios <11094129+GroveMinting@users.noreply.github.com>
+Date: Tue, 22 Sep 2026 14:19:27 -0400
+Subject: [PATCH 3/8] Isolate Hugging Face dataset cache
+
+(cherry picked from commit 28f4a0520d99fd908c3bfaaca86f9bb3b25fe062)
+---
+ corpora/fetch.py          | 109 +++++++++++++--------
+ tests/test_fetch_cache.py | 197 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 268 insertions(+), 38 deletions(-)
+ create mode 100644 tests/test_fetch_cache.py
+
+diff --git a/corpora/fetch.py b/corpora/fetch.py
+index fb61758..2203604 100644
+--- a/corpora/fetch.py
++++ b/corpora/fetch.py
+@@ -19,14 +19,17 @@ that actually matters - a window must not span a seam that carries no meaning.
+ 
+ Driven by `python3 -m corpora all`, which knows the datasets each lane wants.
+ 
+-The dataset cache is deleted afterwards unless --keep-cache: converting
+-OpenThoughts left thirteen gigabytes of Arrow behind.
++Unless --keep-cache is set, this process gives `datasets` a temporary cache and
++deletes only that directory afterwards. Converting OpenThoughts can leave
++thirteen gigabytes of Arrow behind, but an unrelated Hugging Face cache is not
++this script's to remove.
+ """
+ 
+ import argparse
+ import os
+ import shutil
+ import sys
++import tempfile
+ 
+ os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+ 
+@@ -57,43 +60,18 @@ def as_text(row):
+ KINDS = {"chat": as_chat, "text": as_text}
+ 
+ 
+-def main():
+-    ap = argparse.ArgumentParser()
+-    ap.add_argument("--dataset", required=True)
+-    ap.add_argument("--config", default=None,
+-                    help="dataset configuration, e.g. 20231101.en for wikipedia")
+-    ap.add_argument("--streaming", action="store_true",
+-                    help="read the dataset over the network instead of "
+-                         "downloading it first. Wikipedia is tens of "
+-                         "gigabytes of Parquet and only the text is wanted, "
+-                         "so streaming it with --limit costs a fraction of "
+-                         "the disk and none of the wait.")
+-    ap.add_argument("--kind", choices=sorted(KINDS), required=True)
+-    ap.add_argument("--out", required=True)
+-    ap.add_argument("--held-out", default=None,
+-                    help="where to keep some back; skipped if not given")
+-    ap.add_argument("--hold", type=int, default=400)
+-    ap.add_argument("--limit", type=int, default=0)
+-    ap.add_argument("--group", type=int, default=16_000,
+-                    help="characters per file; a record is never split")
+-    ap.add_argument("--shard", type=int, default=2000,
+-                    help="files per subdirectory")
+-    ap.add_argument("--keep-cache", action="store_true")
+-    a = ap.parse_args()
+-
+-    from datasets import load_dataset
+-    conv = KINDS[a.kind]
+-    what = a.dataset + (f" [{a.config}]" if a.config else "")
+-    print(f"  {'streaming' if a.streaming else 'downloading'} {what}",
+-          flush=True)
+-    d = load_dataset(a.dataset, a.config, split="train",
+-                     streaming=a.streaming)
++def _convert(a, load_dataset, cache_dir=None):
++    kwargs = {"split": "train", "streaming": a.streaming}
++    if cache_dir is not None:
++        kwargs["cache_dir"] = cache_dir
++    d = load_dataset(a.dataset, a.config, **kwargs)
+     # A streamed dataset has no length - it is an iterator over a remote file,
+     # and asking costs a full pass.
+     print(f"  {len(d):,} records" if not a.streaming
+           else "  record count unknown until the read finishes", flush=True)
+     os.makedirs(a.out, exist_ok=True)
+ 
++    conv = KINDS[a.kind]
+     buf, files, chars, held, skipped = [], 0, 0, 0, 0
+     def flush(where, idx):
+         nonlocal chars
+@@ -129,12 +107,67 @@ def main():
+     print(f"  wrote {files:,} files to {a.out}"
+           + (f" and {held:,} to {a.held_out}" if a.held_out else "")
+           + f", {chars/1e6:,.1f}M characters ({skipped:,} skipped)", flush=True)
++
++
++def _remove_cache(path):
++    """Remove the cache we created, or fail rather than claiming success."""
++    shutil.rmtree(path)
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--dataset", required=True)
++    ap.add_argument("--config", default=None,
++                    help="dataset configuration, e.g. 20231101.en for wikipedia")
++    ap.add_argument("--streaming", action="store_true",
++                    help="read the dataset over the network instead of "
++                         "downloading it first. Wikipedia is tens of "
++                         "gigabytes of Parquet and only the text is wanted, "
++                         "so streaming it with --limit costs a fraction of "
++                         "the disk and none of the wait.")
++    ap.add_argument("--kind", choices=sorted(KINDS), required=True)
++    ap.add_argument("--out", required=True)
++    ap.add_argument("--held-out", default=None,
++                    help="where to keep some back; skipped if not given")
++    ap.add_argument("--hold", type=int, default=400)
++    ap.add_argument("--limit", type=int, default=0)
++    ap.add_argument("--group", type=int, default=16_000,
++                    help="characters per file; a record is never split")
++    ap.add_argument("--shard", type=int, default=2000,
++                    help="files per subdirectory")
++    ap.add_argument("--keep-cache", action="store_true",
++                    help="use and preserve the normal shared datasets cache")
++    a = ap.parse_args()
++
++    from datasets import load_dataset
++    what = a.dataset + (f" [{a.config}]" if a.config else "")
++    print(f"  {'streaming' if a.streaming else 'downloading'} {what}",
++          flush=True)
++    cache_dir = None
+     if not a.keep_cache:
+-        # datasets/ only. The parent also holds downloaded models and tokens
+-        # that this script did not put there and has no business deleting.
+-        shutil.rmtree(os.path.expanduser("~/.cache/huggingface/datasets"),
+-                      ignore_errors=True)
+-        print("  removed the dataset cache", flush=True)
++        # Keep large Arrow intermediates on the same storage the corpus uses;
++        # /tmp is often a small tmpfs and OpenThoughts alone can exceed it. The
++        # hidden directory is ignored by the corpus walker if one surveys the
++        # output while conversion is still running.
++        os.makedirs(a.out, exist_ok=True)
++        cache_root = os.path.realpath(a.out)
++        cache_dir = tempfile.mkdtemp(prefix=".minagi-hf-datasets-",
++                                     dir=cache_root)
++    try:
++        _convert(a, load_dataset, cache_dir)
++    except BaseException as conversion_error:
++        if cache_dir is not None:
++            try:
++                _remove_cache(cache_dir)
++            except OSError as cleanup_error:
++                raise RuntimeError(
++                    f"dataset conversion failed ({conversion_error}); "
++                    f"temporary cache cleanup also failed ({cleanup_error})"
++                ) from conversion_error
++        raise
++    if cache_dir is not None:
++        _remove_cache(cache_dir)
++        print("  removed the temporary dataset cache", flush=True)
+ 
+     if a.streaming:
+         # datasets' streaming reader leaves a worker thread alive, and CPython
+diff --git a/tests/test_fetch_cache.py b/tests/test_fetch_cache.py
+new file mode 100644
+index 0000000..2d95401
+--- /dev/null
++++ b/tests/test_fetch_cache.py
+@@ -0,0 +1,197 @@
++import contextlib
++import io
++import os
++import sys
++import tempfile
++import types
++import unittest
++from unittest import mock
++
++from corpora import fetch
++
++
++def _argv(out, *extra):
++    return ["fetch.py", "--dataset", "example/data", "--kind", "text",
++            "--out", out, "--group", "40", *extra]
++
++
++class FetchCacheTest(unittest.TestCase):
++    def _owned_cache(self, root):
++        path = os.path.join(root, "owned-datasets-cache")
++
++        def make(prefix, dir):
++            self.assertEqual(prefix, ".minagi-hf-datasets-")
++            self.assertEqual(os.path.abspath(dir), os.path.abspath(root))
++            os.makedirs(path)
++            return path
++
++        return path, make
++
++    def test_default_uses_and_removes_only_owned_cache(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "out")
++            shared = os.path.join(tmp, ".cache", "huggingface", "datasets")
++            os.makedirs(shared)
++            sentinel = os.path.join(shared, "unrelated.arrow")
++            with open(sentinel, "w") as f:
++                f.write("keep")
++            owned, make_cache = self._owned_cache(out)
++            called = {}
++
++            def load_dataset(name, config, **kwargs):
++                called.update(name=name, config=config, **kwargs)
++                with open(os.path.join(kwargs["cache_dir"], "owned.arrow"), "w") as f:
++                    f.write("temporary")
++                return [{"text": "a document long enough to become training text"}]
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            stdout = io.StringIO()
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(sys, "argv", _argv(out)), \
++                    mock.patch.dict(os.environ, {"HOME": tmp}), \
++                    contextlib.redirect_stdout(stdout):
++                self.assertEqual(fetch.main(), 0)
++
++            self.assertEqual(called["cache_dir"], owned)
++            self.assertFalse(os.path.exists(owned))
++            self.assertTrue(os.path.exists(sentinel))
++            self.assertTrue(os.path.exists(
++                os.path.join(out, "0000", "part-000000.txt")))
++            self.assertIn("temporary dataset cache", stdout.getvalue())
++
++    def test_keep_cache_uses_library_default(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            called = {}
++
++            def load_dataset(name, config, **kwargs):
++                called.update(kwargs)
++                return [{"text": "a document long enough to become training text"}]
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=AssertionError("cache allocated")), \
++                    mock.patch.object(sys, "argv", _argv(
++                        os.path.join(tmp, "out"), "--keep-cache")), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                self.assertEqual(fetch.main(), 0)
++
++            self.assertNotIn("cache_dir", called)
++
++    def test_owned_cache_is_removed_when_loading_fails(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "out")
++            owned, make_cache = self._owned_cache(out)
++
++            def load_dataset(name, config, **kwargs):
++                with open(os.path.join(kwargs["cache_dir"], "partial"), "w") as f:
++                    f.write("partial")
++                raise RuntimeError("download failed")
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(sys, "argv", _argv(out)), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                with self.assertRaisesRegex(RuntimeError, "download failed"):
++                    fetch.main()
++
++            self.assertFalse(os.path.exists(owned))
++
++    def test_streaming_cleans_cache_before_immediate_exit(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "out")
++            owned, make_cache = self._owned_cache(out)
++
++            def load_dataset(name, config, **kwargs):
++                return [{"text": "a document long enough to become training text"}]
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(fetch.os, "_exit",
++                                      side_effect=SystemExit(0)) as exit_now, \
++                    mock.patch.object(sys, "argv", _argv(out, "--streaming")), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                with self.assertRaises(SystemExit):
++                    fetch.main()
++
++            exit_now.assert_called_once_with(0)
++            self.assertFalse(os.path.exists(owned))
++
++    def test_cleanup_failure_prevents_successful_streaming_exit(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "out")
++            _, make_cache = self._owned_cache(out)
++
++            def load_dataset(name, config, **kwargs):
++                return [{"text": "a document long enough to become training text"}]
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(fetch.shutil, "rmtree",
++                                      side_effect=OSError("cache is busy")), \
++                    mock.patch.object(fetch.os, "_exit") as exit_now, \
++                    mock.patch.object(sys, "argv", _argv(out, "--streaming")), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                with self.assertRaisesRegex(OSError, "cache is busy"):
++                    fetch.main()
++
++            exit_now.assert_not_called()
++
++    def test_conversion_and_cleanup_failures_are_both_reported(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            out = os.path.join(tmp, "out")
++            _, make_cache = self._owned_cache(out)
++
++            def load_dataset(name, config, **kwargs):
++                raise ValueError("bad dataset")
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(fetch.shutil, "rmtree",
++                                      side_effect=OSError("cache is busy")), \
++                    mock.patch.object(sys, "argv", _argv(out)), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                with self.assertRaisesRegex(
++                        RuntimeError,
++                        "bad dataset.*cache cleanup also failed.*cache is busy") as raised:
++                    fetch.main()
++
++            self.assertIsInstance(raised.exception.__cause__, ValueError)
++
++    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
++    def test_cache_path_is_resolved_before_conversion(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            target = os.path.join(tmp, "target")
++            os.makedirs(target)
++            out = os.path.join(tmp, "out-link")
++            os.symlink(target, out)
++            owned, make_cache = self._owned_cache(target)
++
++            def load_dataset(name, config, **kwargs):
++                os.unlink(out)
++                os.makedirs(out)
++                return [{"text": "a document long enough to become training text"}]
++
++            module = types.SimpleNamespace(load_dataset=load_dataset)
++            with mock.patch.dict(sys.modules, {"datasets": module}), \
++                    mock.patch.object(fetch.tempfile, "mkdtemp",
++                                      side_effect=make_cache), \
++                    mock.patch.object(sys, "argv", _argv(out)), \
++                    contextlib.redirect_stdout(io.StringIO()):
++                self.assertEqual(fetch.main(), 0)
++
++            self.assertFalse(os.path.exists(owned))
++
++
++if __name__ == "__main__":
++    unittest.main()
