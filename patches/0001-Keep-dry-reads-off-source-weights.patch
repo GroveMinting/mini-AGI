@@ -1,7 +1,7 @@
-From 9be4932e642e81a4a79eeaa13f1172b9426a00d4 Mon Sep 17 00:00:00 2001
+From e3a839a454ccc35d45691f4be31f3f505eac550a Mon Sep 17 00:00:00 2001
 From: Helios <11094129+GroveMinting@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 11:11:09 -0400
-Subject: [PATCH 1/8] Keep dry reads off source weights
+Subject: [PATCH 1/7] Keep dry reads off source weights
 
 (cherry picked from commit a9214b6813c03ed170f6e49907b35757bfaee455)
 ---
@@ -14,10 +14,10 @@ Subject: [PATCH 1/8] Keep dry reads off source weights
  create mode 100644 tests/test_store_shadow.py
 
 diff --git a/README.md b/README.md
-index 81e2dbd..4c29917 100644
+index 01b689a..7d47040 100644
 --- a/README.md
 +++ b/README.md
-@@ -351,7 +351,7 @@ It is the same path training uses: same chunking, same cache, same gradient step
+@@ -360,7 +360,7 @@ It is the same path training uses: same chunking, same cache, same gradient step
  | `--lr` | default 5e-5, below a training run: reading should adjust the model, not overwrite it |
  | `--mix ""` | skip the before/after scoring |
  

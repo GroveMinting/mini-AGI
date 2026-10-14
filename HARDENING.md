@@ -20,23 +20,13 @@ and recorded below.
 | 0004 | Cap `FileReader._measure` by context | [#18](https://github.com/volotat/mini-AGI/issues/18) | [#27](https://github.com/volotat/mini-AGI/pull/27) | `tests/test_file_reader_measure_context.py` |
 | 0005 | Drop GradSNR `ratio()` bias correction | [#28](https://github.com/volotat/mini-AGI/pull/28) | [#28](https://github.com/volotat/mini-AGI/pull/28) | `tests/test_gradsnr.py` |
 | 0006 | Load a never-saved dir through paging | [#17](https://github.com/volotat/mini-AGI/issues/17) | — | `tests/test_paged_load.py` |
-| 0007 | Boundary-safe text probe | [#30](https://github.com/volotat/mini-AGI/issues/30) | — | `tests/test_text_probe.py` |
-| 0008 | Auto-detect MPS as a first-class device | — | [#3](https://github.com/volotat/mini-AGI/pull/3) | `tests/test_device_autodetect.py` |
+| 0007 | Auto-detect MPS as a first-class device | — | [#3](https://github.com/volotat/mini-AGI/pull/3) | `tests/test_device_autodetect.py` |
 
 The `#` column is the patch number in the exported `patches/` series, which
-follows commit order. Patches 0005 and 0008 come from upstream PRs (#28, #3) that
-are unmerged; 0006 and 0007 have no upstream PR at all — they were authored here
-from the reports (credited in the commit trailers). All four are this mirror's
-own upkeep.
-
-> **Pending drop on the next sync.** Upstream `ce31731` (after the mirrored
-> `60f7ae3`) independently fixes **#30** in `minagi/ingest.py`: it decodes the
-> probe incrementally with `final=not cut` and bumps the verdict-cache version,
-> so a character cut by the sample boundary is no longer treated as binary.
-> Patch **0007 is therefore superseded** and must be dropped when rebasing onto
-> that commit; keep `tests/test_text_probe.py`, which passes unchanged against
-> upstream's implementation and stays valuable as a regression test. The other
-> seven patches apply cleanly to `ce31731` (verified with `git apply --check`).
+follows commit order. Patch 0007 comes from upstream PR #3, which is unmerged;
+0006 has no upstream PR at all — it was authored here from the report. (Patch
+0007 here was the boundary-safe text probe until upstream covered #30; see
+below.)
 
 ### 0001 — dry reads must not touch the source checkpoint
 
@@ -96,23 +86,7 @@ no flag, so it loaded into the in-memory `SharedPool` — which has no
 paging path when `experts/` is on disk and guards the banner call. From the
 report by eletec; upstream has no PR.
 
-### 0007 — the text probe must not split a character
-
-`minagi/ingest.py::looks_like_text` decoded its 4,096-byte sample strictly, so a
-file whose 4,096th byte fell inside a multi-byte character raised
-`UnicodeDecodeError` and was silently dropped from training and evaluation. The
-patch decodes incrementally (`final=False`) so a partial trailing sequence is
-buffered instead of treated as an error; a genuinely invalid sequence earlier in
-the sample still fails, and a sample that decodes to nothing at all (a 1-2 byte
-file cut inside a character) is rejected rather than divided by zero. From the
-report by Dshamir; upstream has no PR.
-
-Note: `collect()` caches its verdicts per directory signature in
-`runs/corpus_index.json`, so a file fixed in place keeps its old verdict. Delete
-that cache if you re-scan a directory whose contents changed under the same
-names. This is upstream's documented trade-off, not changed by the patch.
-
-### 0008 — Apple Silicon should not silently train on the CPU
+### 0007 — Apple Silicon should not silently train on the CPU
 
 `--device` defaulted to `"cuda" if torch.cuda.is_available() else "cpu"`, so on
 an Apple Silicon machine mini-AGI fell back to CPU even though MPS trains fine
@@ -129,6 +103,7 @@ runs without CUDA or MPS hardware.
 |-------|----------------|-------------|-------------|
 | Reset serving cache before RoPE rollover | [#8](https://github.com/volotat/mini-AGI/issues/8) | [#9](https://github.com/volotat/mini-AGI/pull/9) | Upstream's current `serve.py` rewrites this exact path — it re-reads the newest half-window from position 0 with explicit offsets instead of trimming the cache and rebasing the offset, which is what the patch did. Verified against upstream `main` at sync time; no longer needed. |
 | GradSNR: missing grad as zeros | [#19](https://github.com/volotat/mini-AGI/issues/19) | [#20](https://github.com/volotat/mini-AGI/pull/20) | Upstream already zero-fills a parameter that took no part in a step, and additionally resets the meter when the observed set changes shape. Verified against upstream `main` at sync time; no longer needed. |
+| Boundary-safe text probe | [#30](https://github.com/volotat/mini-AGI/issues/30) | `ce31731` (direct commit) | Upstream `ce31731` rewrote `minagi/ingest.py::looks_like_text` into `why_not_text`, decoding the sample incrementally with `final=not cut` (it reads `probe + 1` bytes to know whether the file continues) and bumping the verdict-cache version. A character cut by the sample boundary is no longer treated as binary, so the patch was dropped at this sync. `tests/test_text_probe.py` is kept in the mirror as a regression test; it passes against upstream's implementation unchanged. |
 
 ## Deliberately not carried
 
@@ -139,12 +114,12 @@ runs without CUDA or MPS hardware.
 ## Applying to a plain upstream checkout
 
 The exported series in [`patches/`](patches) applies to upstream
-`60f7ae318cd54f6ed2995335de870107a04d74d4` — the commit this mirror was last
+`ce31731903467468ebb77e68a6d79c352491a87a` — the commit this mirror was last
 synced to (recorded in [`UPSTREAM.md`](UPSTREAM.md)):
 
 ```sh
 git clone https://github.com/volotat/mini-AGI
 cd mini-AGI
-git checkout 60f7ae318cd54f6ed2995335de870107a04d74d4
+git checkout ce31731903467468ebb77e68a6d79c352491a87a
 git am /path/to/mini-AGI/patches/*.patch
 ```

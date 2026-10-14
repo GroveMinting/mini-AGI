@@ -37,13 +37,17 @@ of the fixed paths outside the unit tests.
   session or endpoint details.
 - `UPSTREAM.md` now documents the `hardening` branch (upstream + patches) that
   `main` (upstream + patches + scaffolding) is built from.
+- **Synced to upstream `ce31731`** (from `60f7ae3`): `hardening` rebased,
+  `patches/` re-exported, scaffolding replayed onto `main`.
 
-### Recorded
+### Removed
 
-- Upstream `ce31731` independently fixes **#30** (boundary-safe text probe), so
-  patch **0007** is superseded and will be dropped on the next sync;
-  `tests/test_text_probe.py` is kept as a regression test. The other seven
-  patches still apply to `ce31731`.
+- Patch **0007** (boundary-safe text probe) was dropped: upstream `ce31731`
+  independently fixes **#30** in `minagi/ingest.py` (`why_not_text`, decoding the
+  sample incrementally with `final=not cut` and bumping the verdict-cache
+  version). `tests/test_text_probe.py` is kept as a regression test; it passes
+  against upstream's implementation unchanged. With 0007 gone the MPS patch is
+  now **0007** and the series is seven patches.
 
 ### Measured
 

@@ -1,7 +1,7 @@
-From 5682a787cb6fde2761e2eff5a4763a4179c8bd63 Mon Sep 17 00:00:00 2001
+From 8f551271063a83ae7f08931772dd64e093c32476 Mon Sep 17 00:00:00 2001
 From: Helios <11094129+GroveMinting@users.noreply.github.com>
 Date: Tue, 13 Oct 2026 23:31:42 -0400
-Subject: [PATCH 8/8] Auto-detect Apple Silicon (MPS) as a first-class device
+Subject: [PATCH 7/7] Auto-detect Apple Silicon (MPS) as a first-class device
 
 From PR #3 by MetalstormHS: --device defaulted to
 "cuda" if torch.cuda.is_available() else "cpu", so on Apple Silicon

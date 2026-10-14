@@ -1,7 +1,7 @@
-From 92e0be8e7b8742fa39020d0fa36033fa2374aa3f Mon Sep 17 00:00:00 2001
+From 09c089b1eb05ee876ae5e5b106a0695dabd620ef Mon Sep 17 00:00:00 2001
 From: 10xCrazyHorse <10xCrazyHorse@gmail.com>
 Date: Thu, 8 Oct 2026 10:15:00 -0400
-Subject: [PATCH 5/8] GradSNR.ratio: drop the bias correction
+Subject: [PATCH 5/7] GradSNR.ratio: drop the bias correction
 
 Both averages start at the first reading, not at zero, so dividing by
 1 - beta^n only inflated the ratio: 6.7x at the eighth reading, and a

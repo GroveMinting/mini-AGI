@@ -14,9 +14,10 @@ upstream's work — go there for those, and open model/training issues there.
 ## Synced to
 
 `volotat/mini-AGI` at commit
-[`60f7ae3`](https://github.com/volotat/mini-AGI/commit/60f7ae318cd54f6ed2995335de870107a04d74d4)
-(mirror tag `upstream-20261014`). The exported `patches/` apply to exactly this
-commit; see the bottom of [`HARDENING.md`](HARDENING.md).
+[`ce31731`](https://github.com/volotat/mini-AGI/commit/ce31731903467468ebb77e68a6d79c352491a87a)
+(mirror tag `upstream-20261014`; the previous checkpoint `60f7ae3` is kept as
+`upstream-20261014-1`). The exported `patches/` apply to exactly this commit;
+see the bottom of [`HARDENING.md`](HARDENING.md).
 
 ## Branch model
 

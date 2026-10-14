@@ -17,16 +17,17 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 
 ## Current state
 
-- Upstream synced: `volotat/mini-AGI` @ `60f7ae3`, mirror tag `upstream-20261014`.
+- Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
+  (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
 - Release tag: `v0.1.2-mirror` on `main`.
-- Patchset: **8 patches**, tracked as `patches/*.patch`; test suite: **32 tests**
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **32 tests**
   (29 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass.
-- `main` (default) is the upstream tree plus the patch commits. The exported
-  `patches/` series is the patchset in apply order; regenerate it with
-  `make patches` after rebasing.
+- `main` (default) is `hardening` (upstream + patch commits) plus the mirror
+  scaffolding. The exported `patches/` series is `upstream..hardening` in apply
+  order; regenerate it with `make patches` after rebasing.
 - CI: `tests` on every push; scheduled `upstream-sync` dry-run.
 
 The patch list and rationale live in [`HARDENING.md`](HARDENING.md); the changelog
@@ -71,20 +72,16 @@ and one learning step before trusting a run.
 
 Ordered for GPU work:
 
-- **Run the sync.** Upstream `ce31731` (past the mirrored `60f7ae3`) fixes #30,
-  so patch **0007 is superseded** — drop it during the rebase and keep
-  `tests/test_text_probe.py` as a regression test. The other seven patches apply
-  cleanly; see the note in [`HARDENING.md`](HARDENING.md). `make sync` rewrites
-  `hardening` and `main`, so commit any working-tree changes first.
-- **Training run.** Once the mirror is verified, start a short real run to
-  exercise growth/pruning/continual learning on the card.
+- **Training run.** Start a short real run to exercise growth/pruning/continual
+  learning on the card.
 - **Upstream outreach** (open PRs, issue reporters). Deliberately **not** done; a
   public-communication decision for the owner.
 
-Done on this machine: `make smoke` (tiny create → read --save → serve → one
-request); the CUDA-gated test tier (`tests/test_gpu_paging.py`); a `#30` re-check
-that upstream now covers patch 0007; the `gcnArchName`-on-CUDA fix in
-`tools/device_check.py`; and the export-source fix in `make patches`.
+Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
+superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
+`make smoke` (tiny create → read --save → serve → one request); the CUDA-gated
+test tier (`tests/test_gpu_paging.py`); and the `gcnArchName`-on-CUDA fix in
+`tools/device_check.py`.
 
 ## Risks / open questions
 

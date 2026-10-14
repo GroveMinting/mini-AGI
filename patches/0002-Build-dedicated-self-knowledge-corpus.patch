@@ -1,7 +1,7 @@
-From 315f6e7abd76c41cec446ef510e31c081ee505fa Mon Sep 17 00:00:00 2001
+From 8aee86377a22ca5e0dab1145770517b10e5af493 Mon Sep 17 00:00:00 2001
 From: Helios <11094129+GroveMinting@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 14:04:40 -0400
-Subject: [PATCH 2/8] Build dedicated self-knowledge corpus
+Subject: [PATCH 2/7] Build dedicated self-knowledge corpus
 
 (cherry picked from commit ee3536382bca5ac444b90d8174587c2a3deccff0)
 ---

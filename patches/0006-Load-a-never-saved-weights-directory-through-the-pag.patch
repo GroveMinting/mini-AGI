@@ -1,7 +1,7 @@
-From c19a4abc73f576f691259bf72575b2b6da82509d Mon Sep 17 00:00:00 2001
+From 2ebb864be9c963fb6afc308e137263d1e396f4a4 Mon Sep 17 00:00:00 2001
 From: Helios <11094129+GroveMinting@users.noreply.github.com>
 Date: Tue, 13 Oct 2026 22:53:11 -0400
-Subject: [PATCH 6/8] Load a never-saved weights directory through the paging
+Subject: [PATCH 6/7] Load a never-saved weights directory through the paging
  path
 
 Reported as issue #17 by eletec: serve.py crashed at startup calling

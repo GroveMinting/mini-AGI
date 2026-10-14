@@ -1,7 +1,7 @@
-From 5e0c784aa0a2fa59ebd45eb83631f6c2be4a678b Mon Sep 17 00:00:00 2001
+From 074ec7f817a7edbc69c774370948b9446211e132 Mon Sep 17 00:00:00 2001
 From: Helios <11094129+GroveMinting@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 14:19:27 -0400
-Subject: [PATCH 3/8] Isolate Hugging Face dataset cache
+Subject: [PATCH 3/7] Isolate Hugging Face dataset cache
 
 (cherry picked from commit 28f4a0520d99fd908c3bfaaca86f9bb3b25fe062)
 ---

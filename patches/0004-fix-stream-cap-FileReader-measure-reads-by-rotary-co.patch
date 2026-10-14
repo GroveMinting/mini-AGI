@@ -1,7 +1,7 @@
-From 8ba26afa8f4681f99f74a6234fa066c3147b4409 Mon Sep 17 00:00:00 2001
+From d13beeded548c53776e5c1cc1c979b76a6ea52ec Mon Sep 17 00:00:00 2001
 From: kevin9327 <5299031+kevin9327@users.noreply.github.com>
 Date: Mon, 5 Oct 2026 16:38:44 +0900
-Subject: [PATCH 4/8] fix(stream): cap FileReader measure reads by rotary
+Subject: [PATCH 4/7] fix(stream): cap FileReader measure reads by rotary
  context
 
 Evaluation used the full --chunk length from position 0. When chunk is
