@@ -890,8 +890,13 @@ def main():
         # Both numbers are the POOL. Comparing model.n_params(), which counts
         # the trunk plus whatever is resident, against the pool total reads as
         # the card holding more than the model has.
+        #
+        # An in-memory SharedPool has no `vram_params`: everything it holds is
+        # on the card, so its resident size is its whole size.
+        vram = (pool.vram_params() if hasattr(pool, "vram_params")
+                else pool.n_params())
         print(f"  {pool.n_experts()} experts, "
-              f"{pool.vram_params() / 1e6:.1f}M of {pool.n_params() / 1e6:.1f}M "
+              f"{vram / 1e6:.1f}M of {pool.n_params() / 1e6:.1f}M "
               f"on the card, context {model.cfg.block:,}")
     else:
         print(f"  {model.n_params() / 1e6:.1f}M parameters, "

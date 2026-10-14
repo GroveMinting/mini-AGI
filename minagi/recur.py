@@ -503,7 +503,15 @@ def _load_dir(path, device, paged=None, read_only=False):
     with open(os.path.join(path, "manifest.json")) as f:
         man = json.load(f)
     if paged is None:
-        paged = bool(man.get("paged"))
+        # A directory created but never saved by a paged pool carries the
+        # on-disk expert layout (one file per expert under experts/) without a
+        # `paged` flag in the manifest - that flag is only written on the first
+        # paged save. Prefer the paging path when the layout is on disk, so
+        # such a directory loads as a PagedPool instead of materialising every
+        # expert into memory (and so serve.py's banner has a pool that can be
+        # asked for its resident size).
+        paged = (bool(man.get("paged"))
+                 or os.path.isdir(os.path.join(path, "experts")))
     if paged:
         # build_paged lives in train.py; a caller in another directory (the
         # film's captures run from video/) needs the repo root on the path
