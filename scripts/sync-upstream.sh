@@ -49,6 +49,9 @@ git fetch "$upstream_remote" --prune
 
 echo "== moving the upstream mirror =="
 git branch -f upstream "$upstream_remote/main"
+sync_tag="upstream-$(date -u +%Y%m%d)"
+git tag -f "$sync_tag" upstream >/dev/null
+echo "   mirror at $(git rev-parse --short upstream), tagged $sync_tag"
 
 old_hardening="$(git rev-parse "$hardening")"
 
@@ -91,3 +94,4 @@ echo "OK: rebased onto upstream main and the tests pass."
 echo "Review 'git log --oneline upstream..$hardening', then push with:"
 echo "    git push $push_remote $hardening"
 echo "    git push --force-with-lease $push_remote $main_branch   # the scaffolding commit is rebased each sync"
+echo "    git push $push_remote $sync_tag"
