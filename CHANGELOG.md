@@ -5,6 +5,24 @@ Notable changes to **this hardening mirror**. It tracks
 are not listed here — see [`UPSTREAM.md`](UPSTREAM.md) for the synced commit.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.1.1-mirror] — 2026-10-14
+
+Fixes a crash introduced by patch 0007 in v0.1.0.
+
+### Fixed
+
+- **0007 (text probe).** `looks_like_text` divided by zero on a 1-2 byte file
+  that is a truncated UTF-8 lead sequence (decodes to nothing), aborting a
+  corpus scan. The empty-decode guard is folded into patch 0007 itself, so the
+  series stays correct commit-by-commit. Upstream's original strict decode
+  rejected such a file rather than crashing; this restores that behaviour while
+  keeping the boundary-split fix.
+
+### Documentation
+
+- Corrected the patch-number column in `HARDENING.md` and `CHANGELOG.md` to
+  match the exported `patches/` order (patches 0005-0007 were mislabelled).
+
 ## [v0.1.0-mirror] — 2026-10-14
 
 First tagged snapshot. Tracks upstream `60f7ae3` (mirror tag `upstream-20261014`).
@@ -17,11 +35,12 @@ First tagged snapshot. Tracks upstream `60f7ae3` (mirror tag `upstream-20261014`
 - **0003** — isolate the Hugging Face dataset cache per fetch (upstream #12 / PR #13).
 - **0004** — cap `FileReader._measure` reads by the rotary context, fixing the
   held-out path when `--chunk` exceeds it (upstream #18 / PR #27).
-- **0005** — load a created-but-never-saved weights directory through the paging
+- **0005** — drop the bias correction from `GradSNR.ratio()` (upstream PR #28).
+- **0006** — load a created-but-never-saved weights directory through the paging
   path, fixing the `serve.py` startup crash (upstream #17; authored here).
-- **0006** — decode the ingest text probe incrementally so a character split by
-  the 4 KiB boundary is not rejected (upstream #30; authored here).
-- **0007** — drop the bias correction from `GradSNR.ratio()` (upstream PR #28).
+- **0007** — decode the ingest text probe incrementally so a character split by
+  the 4 KiB boundary is not rejected; a sample that decodes to nothing is
+  rejected rather than divided by zero (upstream #30; authored here).
 - **0008** — auto-detect MPS as a first-class device (upstream PR #3; carried).
 
 ### Infrastructure

@@ -18,14 +18,16 @@ and recorded below.
 | 0002 | Build a dedicated self-knowledge corpus lane | [#10](https://github.com/volotat/mini-AGI/issues/10) | [#11](https://github.com/volotat/mini-AGI/pull/11) | `tests/test_self_knowledge_corpus.py` |
 | 0003 | Isolate the Hugging Face dataset cache | [#12](https://github.com/volotat/mini-AGI/issues/12) | [#13](https://github.com/volotat/mini-AGI/pull/13) | `tests/test_fetch_cache.py` |
 | 0004 | Cap `FileReader._measure` by context | [#18](https://github.com/volotat/mini-AGI/issues/18) | [#27](https://github.com/volotat/mini-AGI/pull/27) | `tests/test_file_reader_measure_context.py` |
-| 0005 | Load a never-saved dir through paging | [#17](https://github.com/volotat/mini-AGI/issues/17) | — | `tests/test_paged_load.py` |
-| 0006 | Boundary-safe text probe | [#30](https://github.com/volotat/mini-AGI/issues/30) | — | `tests/test_text_probe.py` |
-| 0007 | Drop GradSNR `ratio()` bias correction | [#28](https://github.com/volotat/mini-AGI/pull/28) | [#28](https://github.com/volotat/mini-AGI/pull/28) | `tests/test_gradsnr.py` |
+| 0005 | Drop GradSNR `ratio()` bias correction | [#28](https://github.com/volotat/mini-AGI/pull/28) | [#28](https://github.com/volotat/mini-AGI/pull/28) | `tests/test_gradsnr.py` |
+| 0006 | Load a never-saved dir through paging | [#17](https://github.com/volotat/mini-AGI/issues/17) | — | `tests/test_paged_load.py` |
+| 0007 | Boundary-safe text probe | [#30](https://github.com/volotat/mini-AGI/issues/30) | — | `tests/test_text_probe.py` |
 | 0008 | Auto-detect MPS as a first-class device | — | [#3](https://github.com/volotat/mini-AGI/pull/3) | `tests/test_device_autodetect.py` |
 
-Patches 0005, 0006 and 0008 have no upstream PR merged; 0005 and 0006 were
-authored here from the reports (credited in the commit trailers), and 0008 is
-carried from PR #3. All three are this mirror's own upkeep.
+The `#` column is the patch number in the exported `patches/` series, which
+follows commit order. Patches 0005 and 0008 come from upstream PRs (#28, #3) that
+are unmerged; 0006 and 0007 have no upstream PR at all — they were authored here
+from the reports (credited in the commit trailers). All four are this mirror's
+own upkeep.
 
 ### 0001 — dry reads must not touch the source checkpoint
 
@@ -65,7 +67,17 @@ caps each read at the remaining table (`min(n, context - seen)`) and returns
 `None` when nothing is left. Adapted from PR #27 (kevin9327); the test was ported
 from pytest to the repo's unittest runner.
 
-### 0005 — a created-but-never-saved directory loads paged
+### 0005 — GradSNR `ratio()` must not inflate the reading
+
+`GradSNR.ratio()` divided both running averages by `1 - beta**n` (the Adam-style
+bias correction), but these averages start at the first reading, not at zero, so
+the correction only inflated the ratio — 6.7x at the eighth reading, where it is
+first reported, so a constant gradient read above 1. The patch returns
+`||m||^2 / sq` directly. Diagnostic only: `ratio()` feeds the `signal` field in
+the progress line and nothing steers on it. From PR #28 (10xCrazyHorse); the test
+was ported from pytest to unittest.
+
+### 0006 — a created-but-never-saved directory loads paged
 
 `minagi/recur.py::_load_dir` only took the paging path when the manifest carried
 `"paged": true`, a flag first written on a paged save. A directory written by
@@ -75,29 +87,21 @@ no flag, so it loaded into the in-memory `SharedPool` — which has no
 paging path when `experts/` is on disk and guards the banner call. From the
 report by eletec; upstream has no PR.
 
-### 0006 — the text probe must not split a character
+### 0007 — the text probe must not split a character
 
 `minagi/ingest.py::looks_like_text` decoded its 4,096-byte sample strictly, so a
 file whose 4,096th byte fell inside a multi-byte character raised
 `UnicodeDecodeError` and was silently dropped from training and evaluation. The
 patch decodes incrementally (`final=False`) so a partial trailing sequence is
 buffered instead of treated as an error; a genuinely invalid sequence earlier in
-the sample still fails. From the report by Dshamir; upstream has no PR.
+the sample still fails, and a sample that decodes to nothing at all (a 1-2 byte
+file cut inside a character) is rejected rather than divided by zero. From the
+report by Dshamir; upstream has no PR.
 
 Note: `collect()` caches its verdicts per directory signature in
 `runs/corpus_index.json`, so a file fixed in place keeps its old verdict. Delete
 that cache if you re-scan a directory whose contents changed under the same
 names. This is upstream's documented trade-off, not changed by the patch.
-
-### 0007 — GradSNR `ratio()` must not inflate the reading
-
-`GradSNR.ratio()` divided both running averages by `1 - beta**n` (the Adam-style
-bias correction), but these averages start at the first reading, not at zero, so
-the correction only inflated the ratio — 6.7x at the eighth reading, where it is
-first reported, so a constant gradient read above 1. The patch returns
-`||m||^2 / sq` directly. Diagnostic only: `ratio()` feeds the `signal` field in
-the progress line and nothing steers on it. From PR #28 (10xCrazyHorse); the test
-was ported from pytest to unittest.
 
 ### 0008 — Apple Silicon should not silently train on the CPU
 

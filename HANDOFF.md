@@ -22,7 +22,7 @@ Fork: <https://github.com/GroveMinting/mini-AGI>.
 - Repository: `GroveMinting/mini-AGI` (GitHub user `GroveMinting`).
 - Upstream synced: `volotat/mini-AGI` @ `60f7ae3`, mirror tag `upstream-20261014`.
 - Release tag: `v0.1.0-mirror` on `main`.
-- Patchset: **8 patches**; test suite: **28 tests**, all green (`make test`).
+- Patchset: **8 patches**; test suite: **29 tests**, all green (`make test`).
 - Branches:
   - `upstream` — pure mirror of upstream `main`, fast-forward only.
   - `hardening` — upstream + the 8 patch commits.
@@ -100,6 +100,13 @@ Ordered for the move to GPU hardware:
 Done in this pass: carried upstream #3 as patch 0008; recorded #24 as
 deliberately not carried; added `CHANGELOG.md`, tag `v0.1.0-mirror`, the synced
 SHA, and sync tags.
+
+Also done: fixed a divide-by-zero that the text-probe patch (0007) introduced —
+a 1-2 byte file cut inside a UTF-8 character decodes to nothing, and the
+printability ratio divided by zero. The guard is folded into patch 0007 itself,
+so the series stays correct commit-by-commit. The patch-number column in
+`HARDENING.md`/`CHANGELOG.md` was also corrected to match the exported
+`patches/` order.
 
 ## Risks / open questions
 
