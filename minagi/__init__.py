@@ -14,6 +14,7 @@ The pieces, in the order they depend on each other:
     recur       latent recurrence with adaptive depth, built on model + pool
     stream      reading a corpus behind a KV cache, one chunk at a time
     ingest      turning a pile of files into something to read
+    ingestd     scheduled, opt-in file ingestion
     corpus      the fixed-window view, for the batch trainer and benchmarks
     store       the weights directory, which IS the model
     optim       optimisers for the trunk, and the gradient noise scale
@@ -23,8 +24,9 @@ The pieces, in the order they depend on each other:
     report      the model reading statistics off its own weights
     notify      telling someone when a long run needs attention
 
-Nothing here has a command line. `train.py` and `serve.py` are the entry
-points, alongside the `benchmarks`, `corpora` and `experiments` packages.
+Nothing here has a command line except the ingestion daemon's `main`.
+`train.py`, `serve.py`, and `ingestd.py` are the entry points, alongside the
+`benchmarks`, `corpora` and `experiments` packages.
 """
 
 __all__ = ["tokenizer", "model", "decode", "pool", "recur", "stream",

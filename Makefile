@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup setup-corpora test test-gpu smoke live-probe sync patches run serve clean
+.PHONY: help setup setup-corpora test test-gpu smoke live-probe ingest sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -31,6 +31,10 @@ smoke: ## end-to-end: tiny create -> read --save -> serve -> one request
 live-probe: ## M1: measure conversation-learning cost (ARGS="--weights <copy> --held-out data/val [--sweep]")
 	@test -n "$(ARGS)" || (echo "usage: make live-probe ARGS='--weights <copy> --held-out data/val [--sweep]'"; exit 1)
 	$(PY) replication/live_probe.py $(ARGS)
+
+ingest: ## M4: ingest opted-in files on a schedule (ARGS="--weights weights --source ~/notes")
+	@test -n "$(ARGS)" || (echo "usage: make ingest ARGS='--weights weights --source ~/notes'"; exit 1)
+	$(PY) ingestd.py $(ARGS)
 
 sync: ## fetch upstream, rebase the patchset, re-export patches, run tests
 	scripts/sync-upstream.sh
