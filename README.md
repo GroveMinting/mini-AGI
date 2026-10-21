@@ -5,7 +5,8 @@
 > and carries a small set of correctness patches not yet merged there. It is not
 > affiliated with or endorsed by the upstream author. `main` is the upstream tree
 > plus the patches listed in [HARDENING.md](HARDENING.md) and fork-only
-> live-serving, ingestion, and self-model additions documented below; see
+> live-serving, ingestion, self-model, and scoped-tool additions documented
+> below; see
 > [UPSTREAM.md](UPSTREAM.md) for how the two relate and how to sync.
 
 mini-AGI - is a **continual learning** byte-level language model that assembles its own architecture, trains from scratch on a single 8 GB VRAM GPU, and keeps learning from everything it reads.
@@ -483,6 +484,86 @@ is rebuilt.
 make self-knowledge ARGS="--weights weights --read"
 ```
 
+## Scoped tools (off by default)
+
+**Fork-only.** `minagi/agency.py` and `tools/agency.py` are a capability
+sandbox, not a container. A normal `serve.py` does not expose them, and the
+model cannot call a tool. Enabling model calls takes both `--tools` and an
+explicit `--tool-policy`; there is no implicit tool path.
+
+The built-ins are `read_text`, `list_dir`, and `stat_path` under granted read
+roots, and `write_text` under a granted write root. There is no shell, network,
+arbitrary Python, or access outside a root. Grants name exact tools; there is no
+wildcard.
+
+```bash
+python3 tools/agency.py list
+python3 tools/agency.py call read_text --allow read_text \
+  --read-root ~/notes --args '{"path":"todo.md"}'
+python3 tools/agency.py call list_dir --allow list_dir \
+  --read-root ~/notes --args '{"path":".","depth":2}'
+```
+
+Writes need a separate grant and root:
+
+```bash
+python3 tools/agency.py call write_text --allow write_text \
+  --write-root ./out --args '{"path":"note.txt","text":"hello"}'
+```
+
+A policy file makes the grant durable and auditable:
+
+```json
+{
+  "allow": ["read_text", "list_dir"],
+  "read_roots": ["/home/me/notes"],
+  "write_roots": [],
+  "max_file_bytes": 65536,
+  "max_result_bytes": 32768
+}
+```
+
+```bash
+python3 tools/agency.py call read_text --policy tool-policy.json \
+  --args '{"path":"todo.md"}'
+make agency ARGS="list"
+```
+
+Every call writes a receipt before the handler runs and a result receipt after
+it. The default ledger is `runs/tool_receipts.jsonl`; it is hash-chained and can
+be checked without executing anything:
+
+```bash
+python3 tools/agency.py verify
+```
+
+The ledger records the tool, decision, sanitized arguments, result digest and
+size, and errors. It does not store file contents. `write_text` argument text is
+redacted. Denied, malformed, and unknown calls are recorded too.
+
+For model use, the protocol is literal text; the result is injected back into
+the context:
+
+```text
+<tool>
+{"name": "read_text", "args": {"path": "todo.md"}}
+</tool>
+```
+
+```bash
+python3 serve.py --tools --tool-policy tool-policy.json --max-tool-calls 2
+```
+
+A reply may make at most `--max-tool-calls` calls (default 2). Tool results are
+not fed into the live-learning update; the model's own call text is. The result
+block escapes `<` and `>`, so file text cannot start a second call.
+
+This is a same-process path/allowlist sandbox, not an OS sandbox. Symlinks are
+resolved and must stay under a root, but a same-user process can still race a
+path between check and open. Do not grant `/` or a secrets directory. The
+receipt chain detects an edited or truncated line, not a full rewrite by
+someone with write access to the ledger.
+
 ## Benchmarks
 
 The numbers below are for tracking purposes and move as the run continues. Held-out loss is reported with its standard error, and the size of the evaluation is what sets that error - a difference smaller than it is noise.
@@ -627,6 +708,7 @@ minagi/          the model and its serving/ingestion helpers
   decode.py        how a character is chosen, without a random number generator
   ingest.py        turning a pile of files into something to read
   ingestd.py       scheduled, opt-in file ingestion
+  agency.py        sandboxed tool registry, permissions, receipts
   pool.py          the expert pool, and the rules by which it grows and shrinks
   paged.py         the same pool spread over disk, RAM and VRAM
   recur.py         latent recurrence with adaptive depth
@@ -643,6 +725,7 @@ minagi/          the model and its serving/ingestion helpers
 train.py         read | stream | ponder-probe
 serve.py         local web UI
 ingestd.py       ingest opted-in files on a schedule
+tools/agency.py  list or run a sandboxed tool
 tools/rebuild_self_knowledge.py  rebuild the self-knowledge lane from a checkpoint
 replication/     measurement probes (forgetting, live conversation cost)
 config.yaml      the settings worth changing

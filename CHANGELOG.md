@@ -28,7 +28,15 @@ Fork-only additions. These are not upstream features.
   checkpoint manifest, expand train/val, and optionally re-read the lane;
   `self_knowledge.yaml` now points at an existing tool.
 - Tests for manifest-driven self-knowledge rebuilds and the non-growing read
-  command; the suite is now 78 tests (3 CUDA-gated).
+  command.
+- `minagi/agency.py` + `tools/agency.py` — opt-in filesystem tool registry with
+  exact-name grants, explicit read/write roots, path confinement, bounded
+  results, and a hash-chained append-only receipt ledger. `serve.py` runs a
+  bounded `<tool>` loop only with `--tools --tool-policy`; tool use is off by
+  default. There is no shell, network, or arbitrary Python tool.
+- Tests for deny-by-default, root escapes and symlinks, argument validation,
+  result bounds, the tool parser/result escaping, receipt tampering, and the
+  CLI; the suite is now 95 tests (3 CUDA-gated).
 
 ### Fixed
 
@@ -42,8 +50,8 @@ Fork-only additions. These are not upstream features.
 - `serve.py` learns by default. With `data/val` present, the held-out gate is on
   by default; a live chunk below 2048 characters is refused unless the gate is
   enabled.
-- `README.md` documents the fork-only live, ingestion, and self-model paths;
-  `HANDOFF.md` current state refreshed.
+- `README.md` documents the fork-only live, ingestion, self-model, and scoped
+  tool paths; `HANDOFF.md` current state refreshed.
 
 ## [v0.1.2-mirror] — 2026-10-14
 
