@@ -20,8 +20,9 @@
 # survival_chars_m, dying_at, n_lanes, subjects
 #
 # ONE FACT, SEVERAL WORDINGS. `say` is one answer or a list of wordings of the
-# same answer, and tools/rebuild_self_knowledge.py picks one at random every
-# time it writes the question. Every wording must state the SAME facts - they
+# same answer, and corpora/chat.py --self-only picks one at random every time it
+# writes the question. tools/rebuild_self_knowledge.py points that generator at
+# the checkpoint. Every wording must state the SAME facts - they
 # are there so the model learns the facts rather than one string. A single
 # wording repeated hundreds of times is what the model recites to questions it
 # was never asked. Questions are written lowercase and unpunctuated here; the
