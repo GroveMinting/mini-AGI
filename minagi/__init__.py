@@ -22,6 +22,7 @@ The pieces, in the order they depend on each other:
     plasticity  the learning rate, governed by held-out loss
     schedule    the fixed cosine schedule, for the batch trainer
     live        serving a model that is being trained underneath
+    retention   durable held-out readings for the long-run dashboard
     report      the model reading statistics off its own weights
     notify      telling someone when a long run needs attention
 
@@ -31,4 +32,4 @@ Nothing here has a command line except the ingestion daemon's `main`.
 """
 
 __all__ = ["tokenizer", "model", "decode", "pool", "recur", "stream",
-           "corpus", "store", "report", "agency"]
+           "corpus", "store", "report", "agency", "retention"]

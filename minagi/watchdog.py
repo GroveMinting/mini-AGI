@@ -33,12 +33,14 @@ non-paged caller can omit it and let `store.load` reload the existing model.
 import json
 import os
 import shutil
+import sys
 import time
 
 import torch
 
 from . import store
 from .plasticity import Plasticity
+from .retention import RetentionLog
 from .stream import FolderEvaluator
 
 
@@ -85,7 +87,8 @@ class HeldOutWatchdog:
 
     def __init__(self, model, learner, held_out, best_dir=None, chunk=2048,
                  context=None, chunks=4, factor=1.10, device=None,
-                 lr_control=True, rebuild=None, verbose=True):
+                 lr_control=True, rebuild=None, retention_log=None,
+                 verbose=True):
         if not learner.weights_dir:
             raise ValueError("the watchdog needs a live weights directory")
         self.model = model
@@ -106,6 +109,12 @@ class HeldOutWatchdog:
         pool = getattr(model, "pool", None)
         self.paged = pool is not None and hasattr(pool, "tiers")
         self.plasticity = Plasticity() if lr_control else None
+        self.retention = None
+        if retention_log:
+            try:
+                self.retention = RetentionLog(retention_log)
+            except OSError as e:
+                print(f"  [retention] disabled: {e}", file=sys.stderr)
         self.ev = None
         self.best = None
         self.best_se = 0.0
@@ -155,6 +164,19 @@ class HeldOutWatchdog:
         if self.plasticity is not None:
             self.learner.set_scale(self.plasticity.scale)
 
+    def _record(self, ev):
+        """Persist the reading; a dashboard failure must not break the gate."""
+        if self.retention is None:
+            return
+        rec = dict(ev)
+        rec["model_step"] = int(self.learner.manifest.get("step") or 0)
+        rec["live_steps"] = int(self.learner.steps)
+        rec["chars"] = self.learner.manifest.get("read_chars")
+        try:
+            self.retention.append(rec)
+        except OSError as e:
+            print(f"  [retention] write failed: {e}", file=sys.stderr)
+
     def rebind(self, model, learner):
         """Follow a model/learner that was rebuilt (revert or pool change).
 
@@ -186,6 +208,7 @@ class HeldOutWatchdog:
               "best_dir": self.best_dir}
         self.last, self.last_step = ev, int(self.learner.steps)
         self.events.append(ev)
+        self._record(ev)
         self._say(f"baseline {val:.4f} over {len(doms)} domains; "
                   f"best snapshot in {self.best_dir}")
         return ev
@@ -241,6 +264,7 @@ class HeldOutWatchdog:
         ev["lr_scale"] = self.learner.scale
         self.last = ev
         self.events.append(ev)
+        self._record(ev)
         return ev
 
     def _revert(self):
@@ -283,6 +307,8 @@ class HeldOutWatchdog:
                 "best_dir": self.best_dir, "last": self.last,
                 "factor": self.factor, "chunks": self.chunks,
                 "chunk": self.chunk, "context": self.context,
+                "retention_log": (self.retention.path
+                                  if self.retention is not None else None),
                 "lr_scale": getattr(self.learner, "scale", None),
                 "lr": (self.plasticity.state()["scale"]
                        if self.plasticity is not None else None)}

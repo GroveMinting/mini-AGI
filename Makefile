@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup setup-corpora test test-gpu smoke live-probe ingest self-knowledge agency sync patches run serve clean
+.PHONY: help setup setup-corpora test test-gpu smoke live-probe ingest self-knowledge agency soak retention sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -43,6 +43,12 @@ self-knowledge: ## M5: rebuild self-knowledge from a checkpoint (ARGS="--weights
 agency: ## M6: list or run a sandboxed tool (ARGS="list" or "call ...")
 	@test -n "$(ARGS)" || (echo "usage: make agency ARGS='list' or 'call read_text --allow read_text --read-root DIR --args ...'"; exit 1)
 	$(PY) tools/agency.py $(ARGS)
+
+soak: ## M7: fault-inject save, crash, disk-full, prune, and resume (ARGS="--keep")
+	$(PY) scripts/soak.py $(ARGS)
+
+retention: ## M7: plot longitudinal held-out retention from runs/retention.jsonl
+	$(PY) tools/plot_retention.py $(ARGS)
 
 sync: ## fetch upstream, rebase the patchset, re-export patches, run tests
 	scripts/sync-upstream.sh

@@ -1059,6 +1059,10 @@ def main():
     ap.add_argument("--best-weights", default=None,
                     help="where to keep the best snapshot "
                          "(default: <weights>.best)")
+    ap.add_argument("--retention-log",
+                    default=os.path.join("runs", "retention.jsonl"),
+                    help="append held-out domain readings here for the "
+                         "longitudinal dashboard; empty disables")
     ap.add_argument("--allow-ungated-dense", action="store_true",
                     help="permit --learn-chunk below 2048 without a gate. M1 "
                          "measured material held-out damage at 512")
@@ -1237,7 +1241,8 @@ def main():
                 best_dir=args.best_weights, chunk=args.gate_chunk,
                 context=args.gate_context or None, chunks=args.gate_chunks,
                 factor=args.gate_factor,
-                device=next(model.parameters()).device, rebuild=_rebuild)
+                device=next(model.parameters()).device, rebuild=_rebuild,
+                retention_log=args.retention_log or None)
             ev = watch.start()
             STATE.update(watchdog=watch, gate=ev,
                          gate_every=args.gate_every)
