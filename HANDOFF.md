@@ -20,20 +20,20 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
 - Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
-  fork-only live-serving and ingestion additions documented in
+  fork-only live-serving, ingestion, and self-model additions documented in
   [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **73 tests**
-  (70 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **78 tests**
+  (75 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
-  `make smoke`, and the CUDA test tier all pass. The fork-only live and
-  ingestion paths are covered by the test suite; the live path was exercised on
-  real weights.
+  `make smoke`, and the CUDA test tier all pass. The fork-only live,
+  ingestion, and self-model paths are covered by the test suite; the live path
+  was exercised on real weights.
 - `main` (default) is `hardening` (upstream + patch commits) plus the mirror
-  scaffolding and the fork-only live-serving and ingestion additions. These
-  additions are not upstream features and are not in the exported `patches/`
-  series. The exported series is `upstream..hardening` in apply order;
-  regenerate it with `make patches` after rebasing.
+  scaffolding and the fork-only live-serving, ingestion, and self-model
+  additions. These additions are not upstream features and are not in the
+  exported `patches/` series. The exported series is `upstream..hardening` in
+  apply order; regenerate it with `make patches` after rebasing.
 - CI: `tests` on every push; scheduled `upstream-sync` dry-run.
 
 The patch list and rationale live in [`HARDENING.md`](HARDENING.md); the changelog
@@ -88,8 +88,8 @@ superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
 `make smoke` (tiny create → read --save → serve → one request); the CUDA-gated
 test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
 `tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
-experience/replay), the ingestion daemon, and its 73-test suite; and this
-documentation pass.
+experience/replay), the ingestion daemon, the self-knowledge rebuild tool, and
+its 78-test suite; and this documentation pass.
 
 ## Risks / open questions
 
@@ -103,9 +103,9 @@ documentation pass.
 - **Orin 8 GB live soak.** Longer gated live/replay sessions can leave the
   Orin host unresponsive even though `ping` still works. Keep Orin runs short
   and use Dragon for long soaks until the hang is understood.
-- **One writer per weights directory.** `serve.py`, `train.py`, and
-  `ingestd.py` all write the same weights and optimiser files. Do not run two of
-  them against one directory.
+- **One writer per weights directory.** `serve.py`, `train.py`, `ingestd.py`,
+  and `tools/rebuild_self_knowledge.py --read` write the same weights and
+  optimiser files. Do not run two of them against one directory.
 - **Branch model.** Fork-only feature/docs commits live on `main`; `make sync`
   rebases `main` onto the new `hardening`, so they stay on `main` and are not
   exported in `patches/`. Keep features out of files the hardening patches

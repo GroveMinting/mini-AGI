@@ -23,22 +23,27 @@ Fork-only additions. These are not upstream features.
 - `ingestd.py` + `minagi/ingestd.py` — opt-in scheduled ingestion of files and
   directories, per-source rate limits, persistent offsets, and the same
   held-out gate; `--dry-run` and `--once` for inspection.
-- Tests for ingestion offsets, source opt-in, rate limits, and gate rebinding;
-  the suite is now 73 tests (3 CUDA-gated).
+- Tests for ingestion offsets, source opt-in, rate limits, and gate rebinding.
+- `tools/rebuild_self_knowledge.py` — regenerate the self-knowledge lane from a
+  checkpoint manifest, expand train/val, and optionally re-read the lane;
+  `self_knowledge.yaml` now points at an existing tool.
+- Tests for manifest-driven self-knowledge rebuilds and the non-growing read
+  command; the suite is now 78 tests (3 CUDA-gated).
 
 ### Fixed
 
 - `PoolKeeper` now protects the checkpoint's original experts from serve-time
   pruning; a short survival window could previously delete them. Added a test
   that prunes a stale grown expert while keeping the checkpoint.
+- The self-knowledge YAML's rebuild-tool reference now resolves.
 
 ### Changed
 
 - `serve.py` learns by default. With `data/val` present, the held-out gate is on
   by default; a live chunk below 2048 characters is refused unless the gate is
   enabled.
-- `README.md` documents the fork-only live and ingestion paths; `HANDOFF.md`
-  current state refreshed.
+- `README.md` documents the fork-only live, ingestion, and self-model paths;
+  `HANDOFF.md` current state refreshed.
 
 ## [v0.1.2-mirror] — 2026-10-14
 

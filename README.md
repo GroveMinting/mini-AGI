@@ -5,7 +5,7 @@
 > and carries a small set of correctness patches not yet merged there. It is not
 > affiliated with or endorsed by the upstream author. `main` is the upstream tree
 > plus the patches listed in [HARDENING.md](HARDENING.md) and fork-only
-> live-serving and ingestion additions documented below; see
+> live-serving, ingestion, and self-model additions documented below; see
 > [UPSTREAM.md](UPSTREAM.md) for how the two relate and how to sync.
 
 mini-AGI - is a **continual learning** byte-level language model that assembles its own architecture, trains from scratch on a single 8 GB VRAM GPU, and keeps learning from everything it reads.
@@ -451,6 +451,38 @@ make ingest ARGS="--weights weights --source ~/notes --poll 60"
 rate-limited scan and saves on exit. The daemon does not grow the pool; it uses
 the loaded checkpoint and the same live learner as the conversation path.
 
+## Refreshing the self-model
+
+**Fork-only.** The self-knowledge lane is written from a checkpoint's manifest,
+so it goes stale when that checkpoint grows or prunes experts. Rebuild it from
+the model that exists instead of editing a count by hand:
+
+```bash
+python3 tools/rebuild_self_knowledge.py --weights weights
+```
+
+The tool sets `MINAGI_FACTS_WEIGHTS` for `corpora/chat.py --self-only`, reads
+`weights/manifest.json`, regenerates both `data/train/self-knowledge` and
+`data/val/self-knowledge`, and leaves the old files replaced. Use `--source` and
+`--out` to keep the generated `.bin` and text elsewhere. `--dry-run` prints the
+commands without writing anything.
+
+After growth or pruning, re-read the new lane so the model's own account of
+itself is part of its weights:
+
+```bash
+python3 tools/rebuild_self_knowledge.py --weights weights --read
+```
+
+`--read` runs `train.py read data/train/self-knowledge --save` with growth
+disabled. It writes the same weights directory, so do not run it beside
+`serve.py`, `train.py`, or `ingestd.py`. Without `--read`, only the corpus lane
+is rebuilt.
+
+```bash
+make self-knowledge ARGS="--weights weights --read"
+```
+
 ## Benchmarks
 
 The numbers below are for tracking purposes and move as the run continues. Held-out loss is reported with its standard error, and the size of the evaluation is what sets that error - a difference smaller than it is noise.
@@ -587,7 +619,7 @@ If a run diverges, it repairs itself: when held-out exceeds the best by more tha
 ## Layout
 
 ```
-minagi/          the model. no command lines here.
+minagi/          the model and its serving/ingestion helpers
   config.py        reading config.yaml, which building and training both use
   precision.py     what the model computes in, and how moments are stored
   tokenizer.py     bytes in, bytes out - 256 values plus structural markers
@@ -611,6 +643,7 @@ minagi/          the model. no command lines here.
 train.py         read | stream | ponder-probe
 serve.py         local web UI
 ingestd.py       ingest opted-in files on a schedule
+tools/rebuild_self_knowledge.py  rebuild the self-knowledge lane from a checkpoint
 replication/     measurement probes (forgetting, live conversation cost)
 config.yaml      the settings worth changing
 corpora/         python3 -m corpora all - the whole corpus, downloaded and made
