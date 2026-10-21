@@ -19,15 +19,19 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
-- Release tag: `v0.1.2-mirror` on `main`.
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **32 tests**
-  (29 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+- Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
+  fork-only live-serving additions documented in [README.md](README.md).
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **60 tests**
+  (57 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
-  `make smoke`, and the CUDA test tier all pass.
+  `make smoke`, and the CUDA test tier all pass. The fork-only live-serving path
+  is covered by the test suite and was exercised on real weights.
 - `main` (default) is `hardening` (upstream + patch commits) plus the mirror
-  scaffolding. The exported `patches/` series is `upstream..hardening` in apply
-  order; regenerate it with `make patches` after rebasing.
+  scaffolding and the fork-only live-serving additions. These additions are not
+  upstream features and are not in the exported `patches/` series. The exported
+  series is `upstream..hardening` in apply order; regenerate it with
+  `make patches` after rebasing.
 - CI: `tests` on every push; scheduled `upstream-sync` dry-run.
 
 The patch list and rationale live in [`HARDENING.md`](HARDENING.md); the changelog
@@ -80,8 +84,9 @@ Ordered for GPU work:
 Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
 superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
 `make smoke` (tiny create → read --save → serve → one request); the CUDA-gated
-test tier (`tests/test_gpu_paging.py`); and the `gcnArchName`-on-CUDA fix in
-`tools/device_check.py`.
+test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
+`tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
+experience/replay) and its 60-test suite; and this documentation pass.
 
 ## Risks / open questions
 
@@ -92,3 +97,7 @@ test tier (`tests/test_gpu_paging.py`); and the `gcnArchName`-on-CUDA fix in
 - **WSL2.** GPU passthrough works under WSL2, but the card is shared with the
   host: check it is free before `tools/device_check.py` (which refuses a busy
   card unless `--force`).
+- **Branch model.** The fork-only live-serving commit is on `main`, while
+  [`UPSTREAM.md`](UPSTREAM.md) still describes `main` as `hardening` plus
+  scaffolding. A `make sync` will replay that commit onto `hardening`; decide
+  whether it belongs there before syncing upstream.

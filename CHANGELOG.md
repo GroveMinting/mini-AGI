@@ -5,6 +5,31 @@ Notable changes to **this hardening mirror**. It tracks
 are not listed here — see [`UPSTREAM.md`](UPSTREAM.md) for the synced commit.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+Fork-only live-serving additions. These are not upstream features.
+
+### Added
+
+- `replication/live_probe.py` + `make live-probe` — measure the held-out cost of
+  the live conversation stream without writing the source weights.
+- `minagi/watchdog.py` — held-out gate for serving: keep the best state, revert
+  on a real regression, and halve the live learning rate.
+- `minagi/experience.py` — bounded exchange history, an optional JSONL log, and
+  replay through the same learner and gate.
+- `serve.py` flags for the held-out gate, `--learn-context`, the experience log,
+  and replay.
+- Tests for the probe, gate, experience/replay, and serve wiring; the suite is
+  now 60 tests (3 CUDA-gated).
+
+### Changed
+
+- `serve.py` learns by default. With `data/val` present, the held-out gate is on
+  by default; a live chunk below 2048 characters is refused unless the gate is
+  enabled.
+- `README.md` documents the fork-only live path; `HANDOFF.md` current state
+  refreshed.
+
 ## [v0.1.2-mirror] — 2026-10-14
 
 GPU bring-up on an NVIDIA Blackwell card, and the first end-to-end verification

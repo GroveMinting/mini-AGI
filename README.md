@@ -4,8 +4,9 @@
 > [`volotat/mini-AGI`](https://github.com/volotat/mini-AGI) that tracks upstream
 > and carries a small set of correctness patches not yet merged there. It is not
 > affiliated with or endorsed by the upstream author. `main` is the upstream tree
-> plus the patches listed in [HARDENING.md](HARDENING.md); see
-> [UPSTREAM.md](UPSTREAM.md) for how the two relate and how to sync.
+> plus the patches listed in [HARDENING.md](HARDENING.md) and fork-only
+> live-serving additions documented below; see [UPSTREAM.md](UPSTREAM.md) for how
+> the two relate and how to sync.
 
 mini-AGI - is a **continual learning** byte-level language model that assembles its own architecture, trains from scratch on a single 8 GB VRAM GPU, and keeps learning from everything it reads.
 It stores its weights as ordinary files on disk and pages them onto the card as it needs them, so the parameter count is bounded by free disk space rather than by VRAM. It grows new capacity while training when it runs short, prunes what nothing asks for, and reads through exactly the same code path it serves on. Targeted at a PC or laptop with at least an 8 GB VRAM GPU on the board. 
@@ -369,6 +370,50 @@ It is the same path training uses: same chunking, same cache, same gradient step
 
 Two defaults worth knowing. **Nothing is saved without `--save`**, so a read is a dry run until you decide otherwise. Dry reads send changed expert files to a temporary overlay, so eviction cannot write part of the in-memory update back to the real model. And it scores the held-out mixture before and after, then says plainly if reading your files cost the model ground elsewhere.
 
+## Learning from a conversation
+
+**Fork-only.** The live gate, experience log, replay, and live probe in this
+section are additions in this fork, not upstream features.
+
+`serve.py` learns from the conversation as it serves. It writes `weights/`;
+`--no-learn` opens the weights read-only. If `data/val` exists, the held-out
+watchdog is on by default: it keeps a `<weights>.best` snapshot, scores held-out
+every 32 live steps, and restores the snapshot (halving the learning rate) when
+held-out is worse than the best by `--gate-factor` (default 1.10x), with a
+three-standard-error noise floor. `--held-out` chooses another directory;
+`--no-gate` removes the guard.
+
+The default live step is `training.chunk` (2048 characters). A lower
+`--learn-chunk` is refused unless the gate is on, because a denser live stream
+costs held-out. On an 8 GB card, use `--learn-context 512` if the default block
+does not fit.
+
+Cumulative experience is opt-in:
+
+```bash
+python3 serve.py --port 8080 \
+    --experience-log runs/live/exchanges.jsonl \
+    --replay-every 8
+```
+
+`--experience-log` writes the user's and the model's text to JSONL; it is off by
+default and should be treated as private. `--replay-every` needs the gate: one
+recent exchange is fed back every N turns, optionally interleaved with a
+`--replay-corpus` folder, through the same learner and gate.
+
+To measure the live stream without changing your weights:
+
+```bash
+python3 replication/live_probe.py --weights weights --held-out data/val --sweep
+```
+
+The probe copies `--weights` to a temporary directory unless `--no-copy` is
+passed. The same command is available through the fork-only Make target:
+
+```bash
+make live-probe ARGS="--weights weights --held-out data/val --sweep"
+```
+
 ## Benchmarks
 
 The numbers below are for tracking purposes and move as the run continues. Held-out loss is reported with its standard error, and the size of the evaluation is what sets that error - a difference smaller than it is noise.
@@ -468,8 +513,10 @@ Reading is learning: characters trained on per second. Writing is a reply being 
     ```
 6. Serve it:
     ```bash
-    python3 serve.py --port 8080            # then open http://127.0.0.1:8080
+    python3 serve.py --port 8080             # learns from the conversation
+    python3 serve.py --port 8080 --no-learn  # read-only
     ```
+    Then open http://127.0.0.1:8080. Serving writes `weights/` unless `--no-learn` is set; see [Learning from a conversation](#learning-from-a-conversation).
 
 The run writes a sample log, redraws its graphs as it goes, and checkpoints every few minutes. It is meant to be left alone for days.
 
@@ -484,6 +531,8 @@ python3 -m corpora expand                          # .bin -> the text files read
 python3 train.py read --help                       # every knob the reader has
 python3 train.py stream --steps 140000 --lr 2e-4   # the packed-corpus path
 python3 train.py ponder-probe --ckpt weights       # depth against difficulty
+
+make live-probe ARGS="--weights weights --held-out data/val --sweep"  # fork-only
 ```
 
 Every tool takes `--ckpt weights` - the directory is the model, and there are no `.pt` files to keep track of.
@@ -514,11 +563,14 @@ minagi/          the model. no command lines here.
   optim.py         how much of a gradient is signal
   plasticity.py    the learning rate, governed by held-out loss
   live.py          serving a model that is being trained underneath
+  watchdog.py      held-out gate for the live stream
+  experience.py    exchange history and replay for the live stream
   report.py        the model reading statistics off its own weights
   create.py        writing a fresh weights directory from config.yaml
 
 train.py         read | stream | ponder-probe
 serve.py         local web UI
+replication/     measurement probes (forgetting, live conversation cost)
 config.yaml      the settings worth changing
 corpora/         python3 -m corpora all - the whole corpus, downloaded and made
 weights/         one file per expert. this directory is the model.
