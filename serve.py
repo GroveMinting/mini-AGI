@@ -23,8 +23,11 @@ Binds to localhost.
 """
 
 import argparse
+import atexit
+import gc
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -55,7 +58,9 @@ app = Flask(__name__)
 # two overlapping requests would interleave their forward passes through the
 # same KV caches and produce two corrupted replies instead of one good one.
 LOCK = threading.Lock()
-STATE = {"model": None, "tok": None, "weights": None, "learner": None}
+STATE = {"model": None, "tok": None, "weights": None, "learner": None,
+         "watchdog": None, "gate": None, "experience": None,
+         "replay": None, "session": None, "turn": 0}
 
 U0, U1, B0, B1 = "<user>", "</user>", "<bot>", "</bot>"
 
@@ -125,7 +130,7 @@ def _manifest(path):
 
 
 def load(weights, device=None, learn=True, lr=3e-4, save_every=8,
-         chunk=None):
+         chunk=None, context=0):
     dev = torch.device(device) if device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu")
     # read_only marks nothing dirty, so an expert paged in is never written
@@ -172,6 +177,7 @@ def load(weights, device=None, learn=True, lr=3e-4, save_every=8,
             # --learn-chunk trades that against the denser diet live.py warns
             # about.
             chunk=chunk or _g(c, "training.chunk", 2048),
+            context=context or None,
             save_every=save_every,
             weights_dir=weights,
             manifest=_manifest(weights))
@@ -222,8 +228,28 @@ def learn_state():
     lr_ = STATE.get("learner")
     if lr_ is None:
         return None
-    return {"pending": int(lr_.pending), "chunk": int(lr_.chunk),
-            "steps": int(lr_.steps)}
+    out = {"pending": int(lr_.pending), "chunk": int(lr_.chunk),
+           "steps": int(lr_.steps), "lr_scale": round(float(lr_.scale), 4),
+           "model_step": int(lr_.manifest.get("step") or 0)
+           + int(lr_.steps)}
+    g = STATE.get("gate")
+    if g:
+        out["gate"] = {k: g.get(k) for k in
+                       ("action", "val", "best", "limit", "lr_scale")}
+    exp = STATE.get("experience")
+    if exp is not None:
+        out["experience"] = {"recent": len(exp), "appended": exp.appended,
+                             "loaded": exp.loaded, "log": exp.path}
+    rp = STATE.get("replay")
+    if rp is not None:
+        out["replay"] = {"every": rp.every, "turns": rp.turn,
+                         "corpus": bool(rp.corpus),
+                         "user_only": rp.user_only}
+    kp = STATE.get("keeper")
+    if kp is not None:
+        out["growth"] = {"every": kp.every, "checks": kp.checks,
+                         "events": len(kp.events)}
+    return out
 
 
 def build_prompt(messages, budget, prime=""):
@@ -368,6 +394,89 @@ def remember(user_text, bot_text):
             if learner.due_to_save():
                 learner.save()
                 out["saved"] = True
+        watch = STATE.get("watchdog")
+        if watch is not None:
+            try:
+                ev = watch.maybe_check(STATE.get("gate_every", 32))
+                if ev is not None:
+                    STATE["gate"] = ev
+                    out["gate"] = {k: ev.get(k) for k in
+                                   ("action", "val", "best", "limit",
+                                    "lr_scale", "domains")}
+            except Exception as e:                            # noqa: BLE001
+                # A gate failure must not cost the reply or the learning step.
+                print(f"[gate] failed: {e}", file=sys.stderr)
+                out["gate_error"] = str(e)
+
+        # A gate revert may have rebuilt the model and learner.
+        learner = STATE.get("learner") or learner
+        out["pending"] = int(learner.pending)
+        out["chunk"] = int(learner.chunk)
+        out["total"] = int(learner.steps)
+
+        exp = STATE.get("experience")
+        if exp is not None:
+            STATE["turn"] = int(STATE.get("turn", 0)) + 1
+            exp.append(user_text, bot_text.replace(B1, ""),
+                       session=STATE.get("session"), turn=STATE["turn"],
+                       steps=learner.steps,
+                       model_step=int(learner.manifest.get("step") or 0)
+                       + int(learner.steps))
+
+        keeper = STATE.get("keeper")
+        if (keeper is not None and out.get("gate")
+                and out["gate"].get("action") != "reverted"
+                and out["gate"].get("val") is not None):
+            try:
+                change = keeper.after_check(out["gate"]["val"])
+                if change:
+                    # New and deleted experts only exist in memory until this
+                    # save; the rebuild is what gives the learner an optimizer
+                    # that names the pool it now has.
+                    learner.manifest["step"] = keeper.model_step()
+                    learner.save()
+                    rebuild = STATE.get("rebuild")
+                    if rebuild is None:
+                        raise RuntimeError("no rebuild callback after growth")
+                    fresh, live = rebuild(learner.weights_dir)
+                    watch = STATE.get("watchdog")
+                    if watch is not None:
+                        watch.rebind(fresh, live)
+                    keeper.rebind(fresh, live,
+                                  base_step=int(live.manifest.get("step")
+                                                or keeper.model_step()))
+                    learner = live
+                    out["pool"] = change
+            except Exception as e:                            # noqa: BLE001
+                print(f"[pool] change failed: {e}", file=sys.stderr)
+                out["pool_error"] = str(e)
+                # Do not try the same model change again from a half-applied
+                # state; the next session can start clean.
+                keeper.every = 0
+
+        replay = STATE.get("replay")
+        if replay is not None:
+            gate = STATE.get("gate") or {}
+            item = replay.maybe_next(allow=gate.get("action") != "reverted")
+            if item is not None:
+                replay_text, note = item
+                try:
+                    rr = learner.feed(replay_text, STATE["tok"], note=note)
+                    out["replay"] = {"note": note, "steps": len(rr),
+                                     "chars": len(replay_text)}
+                    if rr and learner.due_to_save():
+                        learner.save()
+                        out["saved"] = True
+                except Exception as e:                        # noqa: BLE001
+                    print(f"[replay] failed: {e}", file=sys.stderr)
+                    out["replay"] = {"error": str(e)}
+
+        learner = STATE.get("learner") or learner
+        out["pending"] = int(learner.pending)
+        out["chunk"] = int(learner.chunk)
+        out["total"] = int(learner.steps)
+        out["model_step"] = (int(learner.manifest.get("step") or 0)
+                             + int(learner.steps))
         return out
     except Exception as e:                                    # noqa: BLE001
         # A failed step must not cost the reply that was already written.
@@ -826,6 +935,39 @@ requestAnimationFrame(grow);
 </body></html>'''
 
 
+def _persist():
+    """Flush the live stream's unsaved steps. Safe to call more than once."""
+    learner = STATE.get("learner")
+    if learner is None or not learner.weights_dir or not learner.unsaved:
+        return
+    got = LOCK.acquire(timeout=10)
+    if not got:
+        print("[save] skipped on exit: the model is busy", file=sys.stderr)
+        return
+    try:
+        if learner.unsaved:
+            learner.save()
+            print("[saved] live steps written on exit", file=sys.stderr)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[save] failed on exit: {e}", file=sys.stderr)
+    finally:
+        LOCK.release()
+
+
+def _install_exit_hooks():
+    atexit.register(_persist)
+
+    def stop(signum, frame):
+        _persist()
+        raise SystemExit(0)
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, stop)
+        except (ValueError, OSError):
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--weights", default="weights",
@@ -852,18 +994,97 @@ def main():
                          "the cost of a denser diet than documents give")
     ap.add_argument("--save-every", type=int, default=8,
                     help="optimiser steps between writing the weights out")
+    ap.add_argument("--learn-context", type=int, default=0,
+                    help="characters the live stream keeps in its cache; "
+                         "0 = the model's block. Lower it on a small card")
     ap.add_argument("--precision", default=None,
                     choices=["bf16", "fp32"],
                     help="what the forward computes in; defaults to whatever "
                          "config.yaml trains with. No fp16: the recurrent "
                          "state reaches ~10,000 and RMSNorm squares it, past "
                          "fp16's 65,504")
+    ap.add_argument("--held-out", default="data/val",
+                    help="held-out corpus the gate scores. The live directory "
+                         "is snapshotted to <weights>.best and restored from "
+                         "there if this gets worse")
+    ap.add_argument("--gate", dest="gate", action="store_true", default=None,
+                    help="watch held-out while learning (default: on when "
+                         "--held-out exists)")
+    ap.add_argument("--no-gate", dest="gate", action="store_false",
+                    help="learn without a held-out watchdog")
+    ap.add_argument("--gate-every", type=int, default=32,
+                    help="live steps between held-out checks")
+    ap.add_argument("--gate-chunks", type=int, default=4,
+                    help="chunks per held-out domain at each check")
+    ap.add_argument("--gate-chunk", type=int, default=2048,
+                    help="characters per held-out chunk (a fixed instrument, "
+                         "independent of --learn-chunk)")
+    ap.add_argument("--gate-context", type=int, default=0,
+                    help="context for held-out chunks; 0 = the model's block")
+    ap.add_argument("--gate-factor", type=float, default=1.10,
+                    help="revert when held-out is this many times the best "
+                         "(a three-standard-error floor is applied too)")
+    ap.add_argument("--best-weights", default=None,
+                    help="where to keep the best snapshot "
+                         "(default: <weights>.best)")
+    ap.add_argument("--allow-ungated-dense", action="store_true",
+                    help="permit --learn-chunk below 2048 without a gate. M1 "
+                         "measured material held-out damage at 512")
+    ap.add_argument("--experience-log", default="",
+                    help="append every exchange to this JSONL file. It holds "
+                         "the user's and the model's text; empty keeps only "
+                         "the in-memory recent window")
+    ap.add_argument("--replay-every", type=int, default=0,
+                    help="replay one past exchange every N turns. Needs the "
+                         "held-out gate; 0 disables")
+    ap.add_argument("--replay-corpus", default="",
+                    help="also replay a slice of a .txt folder every other "
+                         "replay")
+    ap.add_argument("--replay-chars", type=int, default=512,
+                    help="characters per corpus replay slice")
+    ap.add_argument("--replay-user-only", action="store_true",
+                    help="replay only the user's half, not the model's reply")
+    ap.add_argument("--replay-seed", type=int, default=0)
+    ap.add_argument("--grow-every", type=int, default=0,
+                    help="held-out checks between prune/grow decisions; 0 "
+                         "leaves the pool size fixed. Needs the gate and a "
+                         "disk cap")
+    ap.add_argument("--grow-k", type=int, default=1,
+                    help="experts added per growth decision")
+    ap.add_argument("--grow-min-age", type=int, default=3000,
+                    help="steps a grown expert is safe from pruning, and the "
+                         "window prune uses")
+    ap.add_argument("--grow-mem-frac", type=float, default=0.80,
+                    help="do not grow above this fraction of the card")
+    ap.add_argument("--grow-max-experts", type=int, default=512)
+    ap.add_argument("--grow-max-gb", type=float, default=0.0,
+                    help="disk ceiling for growth; required with --grow-every")
+    ap.add_argument("--no-prune", dest="prune", action="store_false",
+                    help="grow without deleting stale experts")
     args = ap.parse_args()
 
     from minagi.config import get as _g, load as _lc
     from minagi.precision import set_compute_dtype
+    cfg = _lc()
     set_compute_dtype(args.precision
-                      or _g(_lc(), "training.precision", "bf16"))
+                      or _g(cfg, "training.precision", "bf16"))
+
+    live_chunk = args.learn_chunk or _g(cfg, "training.chunk", 2048)
+    gate_on = bool(args.learn) and (args.gate if args.gate is not None
+                                    else os.path.isdir(args.held_out))
+    if args.learn and args.gate and not os.path.isdir(args.held_out):
+        raise SystemExit(f"--gate needs a held-out directory; "
+                         f"{args.held_out} is missing")
+    # M1: at 2048 the held-out change was inside the instrument; at 512 it
+    # was material, and the model's own reply roughly tripled it. A lower
+    # chunk is allowed only with the watchdog that can undo it.
+    if args.learn and live_chunk < 2048 and not gate_on \
+            and not args.allow_ungated_dense:
+        raise SystemExit(
+            f"live learning at {live_chunk}-character steps is denser than "
+            f"the 2048 measured safe in M1 (material held-out damage at 512). "
+            f"Use --gate with --held-out {args.held_out}, or "
+            f"--allow-ungated-dense if you accept that.")
 
     if not os.path.exists(os.path.join(args.weights, "core.npz")):
         raise SystemExit(
@@ -880,9 +1101,12 @@ def main():
         print(f"\n  LEARNING IS ON. Talking to this model CHANGES "
               f"{args.weights}/ on disk.\n  Use --no-learn to serve it "
               f"read-only.\n")
+    if args.learn_context < 0:
+        raise SystemExit("--learn-context must be 0 or more")
     model = load(args.weights, args.device, learn=args.learn,
                  lr=args.learn_lr, save_every=args.save_every,
-                 chunk=args.learn_chunk)
+                 chunk=args.learn_chunk,
+                 context=args.learn_context or None)
     if PRIME:
         print(f"  primed with {len(PRIME)} characters of self-knowledge")
     pool = getattr(model, "pool", None)
@@ -901,6 +1125,139 @@ def main():
     else:
         print(f"  {model.n_params() / 1e6:.1f}M parameters, "
               f"context {model.cfg.block:,}")
+
+    # Registered before the baseline evaluation, which can take a minute on a
+    # large held-out: an interrupt during it should still save the live state.
+    _install_exit_hooks()
+
+    if args.learn and gate_on:
+        def _rebuild(path):
+            """Fresh model + learner from the restored directory."""
+            from minagi.live import LiveLearner
+            from minagi.recur import load_any
+            dev = next(STATE["model"].parameters()).device
+            fresh, _ = load_any(path, dev, read_only=False)
+            fresh.eval()
+            old = STATE["learner"]
+            learner = LiveLearner(
+                fresh, lr=args.learn_lr,
+                trunk_lr_mult=_g(cfg, "training.trunk_lr_mult", 0.1),
+                wd=_g(cfg, "training.weight_decay", 0.1),
+                clip=_g(cfg, "training.clip", 1.0),
+                chunk=old.chunk, context=old.context,
+                save_every=args.save_every,
+                weights_dir=args.weights, manifest=_manifest(path))
+            learner.set_scale(old.scale)
+            STATE["model"], STATE["learner"] = fresh, learner
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return fresh, learner
+
+        STATE["rebuild"] = _rebuild
+
+        try:
+            from minagi.watchdog import HeldOutWatchdog
+            watch = HeldOutWatchdog(
+                model, STATE["learner"], args.held_out,
+                best_dir=args.best_weights, chunk=args.gate_chunk,
+                context=args.gate_context or None, chunks=args.gate_chunks,
+                factor=args.gate_factor,
+                device=next(model.parameters()).device, rebuild=_rebuild)
+            ev = watch.start()
+            STATE.update(watchdog=watch, gate=ev,
+                         gate_every=args.gate_every)
+        except Exception as e:                                # noqa: BLE001
+            print(f"  [gate] disabled: {e}", file=sys.stderr)
+            gate_on = False
+            if live_chunk < 2048 and not args.allow_ungated_dense:
+                raise SystemExit(
+                    "the gate could not start and the live chunk is denser "
+                    "than the measured-safe 2048; use --allow-ungated-dense "
+                    "to learn without one")
+    elif args.learn and args.gate is False:
+        print("  [gate] off - held-out is not being watched; a diverged "
+              "stream will be written to disk", file=sys.stderr)
+    elif args.learn:
+        print(f"  [gate] off - {args.held_out} is not a directory; "
+              f"held-out is not being watched", file=sys.stderr)
+
+    if args.replay_every < 0:
+        raise SystemExit("--replay-every must be 0 or more")
+    if args.replay_every and not gate_on:
+        raise SystemExit("--replay-every needs the held-out gate: replay is "
+                         "another live stream and only the gate can tell "
+                         "whether it is helping")
+    if args.grow_every < 0:
+        raise SystemExit("--grow-every must be 0 or more")
+    if args.grow_every and not gate_on:
+        raise SystemExit("--grow-every needs the held-out gate: a bigger "
+                         "pool is a model change, and only the gate can "
+                         "judge it")
+    if args.grow_every and args.grow_max_gb <= 0:
+        raise SystemExit("--grow-every needs --grow-max-gb: an expert is "
+                         "about 25 MB with its Adam moments, and growth "
+                         "must not be allowed to fill the disk")
+    if args.grow_every and args.grow_k < 1:
+        raise SystemExit("--grow-k must be at least 1")
+    if args.grow_every and args.grow_min_age < 1:
+        raise SystemExit("--grow-min-age must be at least 1")
+    if args.replay_every or args.experience_log:
+        from minagi.experience import CorpusSampler, ExchangeLog, Replay
+        corpus = None
+        if args.replay_corpus:
+            corpus = CorpusSampler(args.replay_corpus,
+                                   characters=args.replay_chars,
+                                   seed=args.replay_seed)
+            if not corpus.files:
+                print(f"  [experience] no .txt files under "
+                      f"{args.replay_corpus}", file=sys.stderr)
+                corpus = None
+        log = ExchangeLog(args.experience_log or None, seed=args.replay_seed)
+        replay = (Replay(log, every=args.replay_every, corpus=corpus,
+                         user_only=args.replay_user_only,
+                         seed=args.replay_seed)
+                  if args.replay_every else None)
+        STATE.update(experience=log, replay=replay, turn=0,
+                     session=time.strftime("%Y%m%d-%H%M%S")
+                     + f"-{os.getpid()}")
+        bits = [f"{len(log)} recent"]
+        if log.path:
+            bits.append(f"log {log.path} (user + model text)")
+        if replay is not None:
+            bits.append(f"replay every {replay.every} turns"
+                        + (", corpus" if corpus is not None else ""))
+        print("  [experience] " + "; ".join(bits), file=sys.stderr)
+
+    if args.grow_every:
+        pool = getattr(model, "pool", None)
+        if (pool is None or not hasattr(pool, "add_experts")
+                or not hasattr(pool, "born") or not hasattr(pool, "disk_bytes")):
+            raise SystemExit("--grow-every needs a paged checkpoint with "
+                             "per-expert ages and on-disk sizes")
+        from minagi.growth import PoolKeeper
+        from minagi.pool import AutoGrow
+        base_step = int(_manifest(args.weights).get("step") or 0)
+        # The checkpoint's experts are the originals for this session: their
+        # age starts here, so a short serve cannot judge and delete them.
+        pool.born.fill_(float(base_step))
+        if hasattr(pool, "gate_seen") and hasattr(pool, "gate"):
+            pool.gate_seen.copy_(pool.gate.data.abs())
+        pool.trial = int(args.grow_min_age)
+        if args.grow_max_experts <= pool.n_experts():
+            raise SystemExit(f"--grow-max-experts {args.grow_max_experts} is "
+                             f"not above the checkpoint's {pool.n_experts()}")
+        grower = AutoGrow(grow_k=args.grow_k,
+                          max_experts=args.grow_max_experts,
+                          mem_frac_max=args.grow_mem_frac,
+                          max_disk_gb=args.grow_max_gb)
+        STATE["keeper"] = PoolKeeper(
+            model, STATE["learner"], grower, survival=args.grow_min_age,
+            base_step=base_step, every=args.grow_every, prune=args.prune)
+        print(f"  [pool] growth armed: {pool.n_experts()} experts, ceiling "
+              f"{args.grow_max_experts}, disk cap {args.grow_max_gb:g} GB, "
+              f"every {args.grow_every} gate check(s)", file=sys.stderr)
+
     print(f"\n  http://{args.host}:{args.port}\n")
     app.run(host=args.host, port=args.port, threaded=True)
 

@@ -53,6 +53,10 @@ class LiveLearner:
         # which is the only way this kind of damage shows up.
         self.manifest = dict(manifest or {})
         self.clip = clip
+        # Multiplier on the rates below, moved by the held-out watchdog. Kept
+        # apart from the optimiser's lr so a nudge or a revert never has to
+        # reconstruct the per-group ratio.
+        self.scale = 1.0
         self.aux_weight = aux_weight
         self.save_every = save_every
         self.weights_dir = weights_dir
@@ -160,6 +164,21 @@ class LiveLearner:
                "grad_norm": gn, "note": note, "at": time.time()}
         self.log.append(rec)
         return rec
+
+    def set_scale(self, scale):
+        """Multiply every group's base rate by `scale` (bounded LR control)."""
+        self.scale = max(0.0, float(scale))
+        for group in self.opt.param_groups:
+            group["lr"] = group["base_lr"] * self.scale
+
+    def scale_lr(self, factor):
+        """Move the current scale by `factor`; used when the gate reverts."""
+        self.set_scale(self.scale * float(factor))
+
+    def reset_stream(self):
+        """Drop the partial window after a revert; the next turn starts clean."""
+        self.buf.clear()
+        self.pending = 0
 
     def due_to_save(self):
         return (self.weights_dir and self.save_every

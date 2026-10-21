@@ -377,6 +377,12 @@ def main():
                     help="run even though the card is busy (it will compete with what is there)")
     a = ap.parse_args()
     dev = torch.device(a.device)
+    if dev.type == "cuda" and dev.index is None:
+        # Some builds (the JetPack torch 2.5 wheel on an Orin, for one) reject a
+        # bare "cuda" in the torch.cuda.* helpers even though tensor allocation
+        # accepts it. Pin the current device once so every helper below gets an
+        # index it can resolve.
+        dev = torch.device("cuda", torch.cuda.current_device())
     if dev.type == "cuda":
         free, total = torch.cuda.mem_get_info(dev)
         if free < 0.6 * total and not a.force:

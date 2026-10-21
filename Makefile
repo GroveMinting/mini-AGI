@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup setup-corpora test test-gpu smoke sync patches run serve clean
+.PHONY: help setup setup-corpora test test-gpu smoke live-probe sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -27,6 +27,10 @@ test-gpu: ## run the test suite including CUDA-gated integration tests
 
 smoke: ## end-to-end: tiny create -> read --save -> serve -> one request
 	$(PY) scripts/smoke.py $(ARGS)
+
+live-probe: ## M1: measure conversation-learning cost (ARGS="--weights <copy> --held-out data/val [--sweep]")
+	@test -n "$(ARGS)" || (echo "usage: make live-probe ARGS='--weights <copy> --held-out data/val [--sweep]'"; exit 1)
+	$(PY) replication/live_probe.py $(ARGS)
 
 sync: ## fetch upstream, rebase the patchset, re-export patches, run tests
 	scripts/sync-upstream.sh
