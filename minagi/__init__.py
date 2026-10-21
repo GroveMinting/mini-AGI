@@ -15,6 +15,7 @@ The pieces, in the order they depend on each other:
     stream      reading a corpus behind a KV cache, one chunk at a time
     ingest      turning a pile of files into something to read
     ingestd     scheduled, opt-in file ingestion
+    agency      sandboxed tool registry, permissions, and receipts
     corpus      the fixed-window view, for the batch trainer and benchmarks
     store       the weights directory, which IS the model
     optim       optimisers for the trunk, and the gradient noise scale
@@ -30,4 +31,4 @@ Nothing here has a command line except the ingestion daemon's `main`.
 """
 
 __all__ = ["tokenizer", "model", "decode", "pool", "recur", "stream",
-           "corpus", "store", "report"]
+           "corpus", "store", "report", "agency"]

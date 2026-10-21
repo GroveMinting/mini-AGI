@@ -3,7 +3,7 @@ VENV ?= $(HOME)/.venvs/minagi-hardening
 PY   := $(VENV)/bin/python
 ARGS ?=
 
-.PHONY: help setup setup-corpora test test-gpu smoke live-probe ingest self-knowledge sync patches run serve clean
+.PHONY: help setup setup-corpora test test-gpu smoke live-probe ingest self-knowledge agency sync patches run serve clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -39,6 +39,10 @@ ingest: ## M4: ingest opted-in files on a schedule (ARGS="--weights weights --so
 self-knowledge: ## M5: rebuild self-knowledge from a checkpoint (ARGS="--weights weights [--read]")
 	@test -n "$(ARGS)" || (echo "usage: make self-knowledge ARGS='--weights weights [--read]'"; exit 1)
 	$(PY) tools/rebuild_self_knowledge.py $(ARGS)
+
+agency: ## M6: list or run a sandboxed tool (ARGS="list" or "call ...")
+	@test -n "$(ARGS)" || (echo "usage: make agency ARGS='list' or 'call read_text --allow read_text --read-root DIR --args ...'"; exit 1)
+	$(PY) tools/agency.py $(ARGS)
 
 sync: ## fetch upstream, rebase the patchset, re-export patches, run tests
 	scripts/sync-upstream.sh

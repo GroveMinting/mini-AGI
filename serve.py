@@ -20,6 +20,11 @@ about. Read minagi/live.py for what it costs; it is not free, and on short
 chat it is a far denser diet than documents. `--no-learn` serves read-only.
 
 Binds to localhost.
+
+TOOL USE IS OFF BY DEFAULT. `--tools --tool-policy <file>` lets the model emit
+`<tool>{"name": ..., "args": ...}</tool>` and gives it the result, under an
+explicit allowlist and filesystem roots. The sandbox has no shell, network, or
+arbitrary Python. Tool results are not fed back into the live-learning update.
 """
 
 import argparse
@@ -61,6 +66,11 @@ LOCK = threading.Lock()
 STATE = {"model": None, "tok": None, "weights": None, "learner": None,
          "watchdog": None, "gate": None, "experience": None,
          "replay": None, "session": None, "turn": 0}
+
+# Tool use is off unless --tools is given with a policy file. Keeping the
+# imports lazy means a normal server never imports the sandbox at all.
+TOOLS = {"on": False, "policy": None, "ledger": None, "registry": None,
+         "max_calls": 0, "parse": None, "result_text": None, "run": None}
 
 U0, U1, B0, B1 = "<user>", "</user>", "<bot>", "</bot>"
 
@@ -321,6 +331,7 @@ def stream(prompt, max_new):
 
     cur = out[:, -1:]
     produced = []
+    n_tool = 0
     # The prompt's forwards have admitted its experts. Report them, so the
     # page starts the reply showing what is actually answering it.
     yield {"swap": {"at": 0, "moved": None, "pool": resident_experts()}}
@@ -355,6 +366,27 @@ def stream(prompt, max_new):
         logits = None                       # spent; the next pass recomputes
         produced.append(int(nxt[0, 0]))
         text = tok.decode(produced)
+        if TOOLS["on"] and n_tool < TOOLS["max_calls"]:
+            calls = TOOLS["parse"](text)
+            if calls:
+                call = calls[0]
+                n_tool += 1
+                yield {"tool": {"name": call.name, "args": call.args}}
+                result = TOOLS["run"](TOOLS["registry"], call.name,
+                                      call.args, TOOLS["policy"],
+                                      TOOLS["ledger"])
+                body = TOOLS["result_text"](result.as_dict())
+                ids = tok.encode(body).ids
+                extra = torch.tensor([ids], device=device)
+                out = torch.cat([out, extra], dim=1)
+                if out.shape[1] > block:
+                    out = out[:, -block:]
+                logits = read(out)
+                pos = out.shape[1]
+                cur = out[:, -1:]
+                produced = []
+                yield {"t": body, "tool_result": True}
+                continue
         if text.endswith(B1):
             break
         yield {"t": tok.decode([produced[-1]])}
@@ -503,8 +535,8 @@ def api_chat():
         try:
             with LOCK:
                 for ev in stream(prompt, max_new):
-                    if "t" in ev:
-                        n += 1
+                    if "t" in ev and not ev.get("tool_result"):
+                        n += len(ev["t"])
                         reply.append(ev["t"])
                     yield f"data: {json.dumps(ev)}\n\n"
                 learned = remember(last_user, "".join(reply))
@@ -1030,6 +1062,16 @@ def main():
     ap.add_argument("--allow-ungated-dense", action="store_true",
                     help="permit --learn-chunk below 2048 without a gate. M1 "
                          "measured material held-out damage at 512")
+    ap.add_argument("--tools", action="store_true",
+                    help="let the model call filesystem tools. Off by default; "
+                         "needs --tool-policy")
+    ap.add_argument("--tool-policy", default="",
+                    help="JSON policy with allow/read_roots/write_roots")
+    ap.add_argument("--tool-receipts",
+                    default=os.path.join("runs", "tool_receipts.jsonl"),
+                    help="append-only tool receipt ledger")
+    ap.add_argument("--max-tool-calls", type=int, default=2,
+                    help="tool calls allowed in one reply")
     ap.add_argument("--experience-log", default="",
                     help="append every exchange to this JSONL file. It holds "
                          "the user's and the model's text; empty keeps only "
@@ -1062,6 +1104,38 @@ def main():
     ap.add_argument("--no-prune", dest="prune", action="store_false",
                     help="grow without deleting stale experts")
     args = ap.parse_args()
+
+    if args.tools:
+        if not args.tool_policy:
+            raise SystemExit("--tools needs an explicit --tool-policy file")
+        if args.max_tool_calls < 1:
+            raise SystemExit("--max-tool-calls must be at least 1")
+        from minagi.agency import (Policy, ReceiptLedger, builtin_registry,
+                                   parse_tool_calls, result_text, run)
+        try:
+            policy = Policy.from_file(args.tool_policy)
+            ledger = ReceiptLedger(args.tool_receipts)
+        except Exception as e:                            # noqa: BLE001
+            raise SystemExit(f"cannot enable tools: {e}")
+        if not policy.allowed:
+            raise SystemExit("tool policy grants no tools")
+        registry = builtin_registry()
+        for name in policy.allowed:
+            spec = registry.get(name)
+            if spec is None:
+                raise SystemExit(f"tool policy names unregistered tool: {name}")
+            if spec.capability == "filesystem.read" and not policy.read_roots:
+                raise SystemExit(f"tool {name} needs a read root")
+            if spec.capability == "filesystem.write" and not policy.write_roots:
+                raise SystemExit(f"tool {name} needs a write root")
+        TOOLS.update(on=True, policy=policy, ledger=ledger,
+                     registry=registry, max_calls=args.max_tool_calls,
+                     parse=parse_tool_calls, result_text=result_text,
+                     run=run)
+        print(f"  [tools] ON: {len(policy.allowed)} granted, receipts "
+              f"{args.tool_receipts}", file=sys.stderr)
+    elif args.tool_policy:
+        raise SystemExit("--tool-policy has no effect without --tools")
 
     from minagi.config import get as _g, load as _lc
     from minagi.precision import set_compute_dtype
