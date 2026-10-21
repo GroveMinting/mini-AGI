@@ -21,8 +21,8 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
 - Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
   fork-only live-serving additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **60 tests**
-  (57 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **61 tests**
+  (58 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass. The fork-only live-serving path
@@ -86,7 +86,7 @@ superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
 `make smoke` (tiny create → read --save → serve → one request); the CUDA-gated
 test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
 `tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
-experience/replay) and its 60-test suite; and this documentation pass.
+experience/replay) and its 61-test suite; and this documentation pass.
 
 ## Risks / open questions
 
@@ -97,7 +97,10 @@ experience/replay) and its 60-test suite; and this documentation pass.
 - **WSL2.** GPU passthrough works under WSL2, but the card is shared with the
   host: check it is free before `tools/device_check.py` (which refuses a busy
   card unless `--force`).
-- **Branch model.** The fork-only live-serving commit is on `main`, while
-  [`UPSTREAM.md`](UPSTREAM.md) still describes `main` as `hardening` plus
-  scaffolding. A `make sync` will replay that commit onto `hardening`; decide
-  whether it belongs there before syncing upstream.
+- **Orin 8 GB live soak.** Longer gated live/replay sessions can leave the
+  Orin host unresponsive even though `ping` still works. Keep Orin runs short
+  and use Dragon for long soaks until the hang is understood.
+- **Branch model.** Fork-only feature/docs commits live on `main`; `make sync`
+  rebases `main` onto the new `hardening`, so they stay on `main` and are not
+  exported in `patches/`. Keep features out of files the hardening patches
+  touch to reduce rebase conflicts.
