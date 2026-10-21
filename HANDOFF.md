@@ -20,19 +20,19 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
 - Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
-  fork-only live-serving, ingestion, self-model, and scoped-tool additions
-  documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **95 tests**
-  (92 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+  fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
+  soak additions documented in [README.md](README.md).
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **101 tests**
+  (98 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass. The fork-only live,
-  ingestion, self-model, and scoped-tool paths are covered by the test suite;
-  the live path was exercised on real weights.
+  ingestion, self-model, scoped-tool, retention, and interrupted-save paths are
+  covered by the test suite; the live path was exercised on real weights.
 - `main` (default) is `hardening` (upstream + patch commits) plus the mirror
-  scaffolding and the fork-only live-serving, ingestion, self-model, and
-  scoped-tool additions. These additions are not upstream features and are not
-  in the exported `patches/` series. The exported series is
+  scaffolding and the fork-only live-serving, ingestion, self-model,
+  scoped-tool, retention, and soak additions. These additions are not upstream
+  features and are not in the exported `patches/` series. The exported series is
   `upstream..hardening` in apply order; regenerate it with `make patches` after
   rebasing.
 - CI: `tests` on every push; scheduled `upstream-sync` dry-run.
@@ -90,8 +90,8 @@ superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
 test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
 `tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
 experience/replay), the ingestion daemon, the self-knowledge rebuild tool, the
-scoped tool registry and receipt ledger, and its 95-test suite; and this
-documentation pass.
+scoped tool registry and receipt ledger, the retention log/dashboard, the
+fault-injection soak, and its 101-test suite; and this documentation pass.
 
 ## Risks / open questions
 
@@ -119,6 +119,17 @@ documentation pass.
   results are escaped before re-injection and are not fed to the live learner;
   the model's own call text is. This path is opt-in and does not replace the
   held-out gate.
+- **Saves are atomic per file, not one transaction across shape changes.**
+  Bundles are written to `.tmp` and renamed, the manifest is published last,
+  and pruned expert files are deleted only after it. An interrupted stable-shape
+  save leaves the old manifest loadable; a crash during growth can leave a new
+  core/router with an old manifest, so retry growth from the published
+  checkpoint rather than resuming a half-written one. `scripts/soak.py` covers
+  the stable and prune cases.
+- **Retention log.** `serve.py` writes `runs/retention.jsonl` by default while
+  the gate is on. It contains domain names and losses, not conversation text;
+  `--retention-log ""` disables it. Rows are append-only by convention, not a
+  security boundary; a restarted run appends at the end.
 - **Branch model.** Fork-only feature/docs commits live on `main`; `make sync`
   rebases `main` onto the new `hardening`, so they stay on `main` and are not
   exported in `patches/`. Keep features out of files the hardening patches

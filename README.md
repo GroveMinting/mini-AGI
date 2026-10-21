@@ -564,6 +564,48 @@ path between check and open. Do not grant `/` or a secrets directory. The
 receipt chain detects an edited or truncated line, not a full rewrite by
 someone with write access to the ledger.
 
+## Long runs, retention, and interrupted saves
+
+**Fork-only.** While the held-out gate is on, `serve.py` appends one row per
+check to `runs/retention.jsonl` by default: per-domain held-out loss, the mean,
+the best, the revert limit, and the action. Disable it with
+`--retention-log ""`.
+
+```bash
+python3 tools/plot_retention.py --log runs/retention.jsonl \
+  --out runs/retention.png
+make retention
+```
+
+The dashboard shows the mean with improved/reverted markers, every domain over
+time, the change from the first reading (above zero is worse), and the final
+per-domain change. Rows contain losses and domain names, never conversation
+text. Restarts append to the same file; the plot splits where the character or
+step counter goes backwards.
+
+`scripts/soak.py` injects the failures a long run eventually meets:
+
+```bash
+python3 scripts/soak.py          # baseline, crash, disk full, prune
+make soak
+```
+
+It creates a tiny model and checks that:
+
+- a crash after some bundles but before the manifest leaves the old checkpoint
+  loadable;
+- `ENOSPC` during a save keeps the old manifest and is retried, not lost;
+- a stale expert file survives until the new manifest is durable, then is
+  deleted.
+
+Each bundle is written to `.tmp` and renamed; the manifest is published last;
+pruned expert files are removed only after the manifest. A crash can therefore
+leave extra expert files, which the loader ignores, but not a manifest naming a
+deleted file. A stable-shape save is covered end to end. A save that changes
+tensor shapes (growth) is not a single atomic transaction; retry it from the
+published checkpoint rather than treating a half-written growth save as
+resumable.
+
 ## Benchmarks
 
 The numbers below are for tracking purposes and move as the run continues. Held-out loss is reported with its standard error, and the size of the evaluation is what sets that error - a difference smaller than it is noise.
@@ -718,6 +760,7 @@ minagi/          the model and its serving/ingestion helpers
   plasticity.py    the learning rate, governed by held-out loss
   live.py          serving a model that is being trained underneath
   watchdog.py      held-out gate for the live stream
+  retention.py     durable held-out readings for the long-run dashboard
   experience.py    exchange history and replay for the live stream
   report.py        the model reading statistics off its own weights
   create.py        writing a fresh weights directory from config.yaml
@@ -726,7 +769,9 @@ train.py         read | stream | ponder-probe
 serve.py         local web UI
 ingestd.py       ingest opted-in files on a schedule
 tools/agency.py  list or run a sandboxed tool
+tools/plot_retention.py  plot longitudinal held-out retention
 tools/rebuild_self_knowledge.py  rebuild the self-knowledge lane from a checkpoint
+scripts/soak.py  fault-inject save, crash, disk-full, and resume
 replication/     measurement probes (forgetting, live conversation cost)
 config.yaml      the settings worth changing
 corpora/         python3 -m corpora all - the whole corpus, downloaded and made

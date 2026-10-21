@@ -54,6 +54,32 @@ The script finds the upstream remote automatically: an `upstream` remote if you
 have one, otherwise any remote whose URL points at `volotat/mini-AGI`. Override
 with `UPSTREAM_REMOTE=<name> make sync`.
 
+## Fork-only candidates for upstream
+
+The exported `patches/` are the correctness series; the live, ingestion,
+self-model, and scoped-tool work on `main` is not in it. No external pull
+request has been opened from this checkout. The handoff list, in order of
+readiness, is:
+
+1. **Checkpoint prune ordering (M7).** Publish the manifest before deleting
+   stale expert files, so an interrupted prune cannot leave the old manifest
+   naming a deleted file. This is a small correctness fix with
+   `tests/test_soak.py`; it is the strongest candidate for a separate upstream
+   PR. It currently lives on `main`, not on `hardening`.
+2. **Retention log and dashboard (M7).** Analysis-only: per-domain held-out
+   readings in JSONL and a plot. Low risk, but it introduces a log format and a
+   default write path, so it needs a maintainer decision.
+3. **Scoped tool registry (M6).** Overlaps upstream #24, which the maintainer
+   signalled may be rejected. Do not submit without agreement; this fork keeps
+   it off by default and operator-invoked.
+4. **Live gate/experience (M1-M3), ingestion (M4), self-model rebuild (M5).**
+   Behavior-changing or corpus-policy changes; each needs its own long-run
+   evidence and should not ride on the correctness series.
+
+Local acceptance for the fork-only set is the 101-test CPU/CUDA suite plus
+`scripts/soak.py` and the retention dashboard. None of it is a substitute for
+upstream review.
+
 ## Running it
 
 See the upstream README for the model itself. For this mirror:

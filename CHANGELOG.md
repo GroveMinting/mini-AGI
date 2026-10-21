@@ -36,7 +36,16 @@ Fork-only additions. These are not upstream features.
   default. There is no shell, network, or arbitrary Python tool.
 - Tests for deny-by-default, root escapes and symlinks, argument validation,
   result bounds, the tool parser/result escaping, receipt tampering, and the
-  CLI; the suite is now 95 tests (3 CUDA-gated).
+  CLI.
+- `minagi/retention.py`, `serve.py --retention-log`, and
+  `tools/plot_retention.py` — durable per-domain held-out readings and a
+  longitudinal retention dashboard. Enabled with the gate; no conversation
+  text, and `--retention-log ""` disables it.
+- `scripts/soak.py` + `make soak` — fault injection for a crash mid-bundle,
+  a crash before the manifest, disk full, prune ordering, and retry/resume.
+- Tests for interrupted saves, disk-full retry, prune ordering, the retention
+  log and summary, and watchdog recording; the suite is now 101 tests
+  (3 CUDA-gated).
 
 ### Fixed
 
@@ -44,14 +53,17 @@ Fork-only additions. These are not upstream features.
   pruning; a short survival window could previously delete them. Added a test
   that prunes a stale grown expert while keeping the checkpoint.
 - The self-knowledge YAML's rebuild-tool reference now resolves.
+- Pruned expert files are deleted only after the new manifest is durable. An
+  interrupted prune can no longer leave the old manifest naming a removed
+  file; stale extra files are harmless and are removed on the next save.
 
 ### Changed
 
 - `serve.py` learns by default. With `data/val` present, the held-out gate is on
   by default; a live chunk below 2048 characters is refused unless the gate is
   enabled.
-- `README.md` documents the fork-only live, ingestion, self-model, and scoped
-  tool paths; `HANDOFF.md` current state refreshed.
+- `README.md` documents the fork-only live, ingestion, self-model, scoped
+  tool, retention, and soak paths; `HANDOFF.md` and `UPSTREAM.md` refreshed.
 
 ## [v0.1.2-mirror] — 2026-10-14
 
