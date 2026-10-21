@@ -159,10 +159,15 @@ def save(model, path, step=None, val=None, opt=None, cfg=None, verbose=False,
                         and i < gate.numel() else 1.0})
     live = {e["file"] for e in entries}
     ed = os.path.join(path, EXPERTS)
+    # Deletion happens AFTER the manifest is durable. In the old order a crash
+    # between deleting a pruned expert and replacing the manifest left the old
+    # manifest naming a file that no longer existed - an unloadable checkpoint.
+    # Extra files are harmless because the loader reads only what the manifest
+    # names, so publishing first turns a crash into a stale file, not a lost
+    # model.
     removed = 0
     for f in os.listdir(ed):
         if f.endswith((".npy", ".npz")) and f not in live:
-            os.remove(os.path.join(ed, f))
             removed += 1
 
     if opt is not None:
@@ -178,10 +183,10 @@ def save(model, path, step=None, val=None, opt=None, cfg=None, verbose=False,
         "experts": entries, "total_bytes": int(total),
         "removed_expert_files": removed,
     }
-    tmp = os.path.join(path, "manifest.json.tmp")
-    with open(tmp, "w") as f:
-        json.dump(manifest, f, indent=1)
-    os.replace(tmp, os.path.join(path, "manifest.json"))
+    _write_manifest(path, manifest)
+    for f in os.listdir(ed):
+        if f.endswith((".npy", ".npz")) and f not in live:
+            os.remove(os.path.join(ed, f))
     if verbose:
         n_files = len(entries) + 3
         print(f"  weights/: {len(entries)} experts + 3 bundles = {n_files} files, "
@@ -287,10 +292,7 @@ def _save_paged(model, pool, path, step, val, opt, cfg, verbose, extra=None):
                 "core_tensors": sorted(core), "router_tensors": sorted(routers),
                 "experts": entries, "total_bytes": int(total)}
     manifest.update(extra or {})       # where the reader had got to
-    tmp = os.path.join(path, "manifest.json.tmp")
-    with open(tmp, "w") as f:
-        json.dump(manifest, f, indent=1)
-    os.replace(tmp, os.path.join(path, "manifest.json"))
+    _write_manifest(path, manifest)
     if verbose:
         print(f"  weights/: {len(entries)} experts + 3 bundles, "
               f"{total/1e6:.1f} MB (paged - experts were already on disk)")
@@ -298,11 +300,35 @@ def _save_paged(model, pool, path, step, val, opt, cfg, verbose, extra=None):
 
 
 def _savez(path, arrays):
-    """Atomic bundle write."""
+    """Atomic bundle write, with no partial temp left behind on failure."""
     tmp = path + ".tmp.npz"
-    np.savez(tmp, **arrays)
-    os.replace(tmp, path)
+    try:
+        np.savez(tmp, **arrays)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return sum(a.nbytes for a in arrays.values())
+
+
+def _write_manifest(path, manifest):
+    """Publish the manifest last; the previous one survives a failed write."""
+    tmp = os.path.join(path, "manifest.json.tmp")
+    try:
+        with open(tmp, "w") as f:
+            json.dump(manifest, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, os.path.join(path, "manifest.json"))
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _save_optim(opt, model, path):
