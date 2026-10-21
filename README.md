@@ -5,8 +5,8 @@
 > and carries a small set of correctness patches not yet merged there. It is not
 > affiliated with or endorsed by the upstream author. `main` is the upstream tree
 > plus the patches listed in [HARDENING.md](HARDENING.md) and fork-only
-> live-serving additions documented below; see [UPSTREAM.md](UPSTREAM.md) for how
-> the two relate and how to sync.
+> live-serving and ingestion additions documented below; see
+> [UPSTREAM.md](UPSTREAM.md) for how the two relate and how to sync.
 
 mini-AGI - is a **continual learning** byte-level language model that assembles its own architecture, trains from scratch on a single 8 GB VRAM GPU, and keeps learning from everything it reads.
 It stores its weights as ordinary files on disk and pages them onto the card as it needs them, so the parameter count is bounded by free disk space rather than by VRAM. It grows new capacity while training when it runs short, prunes what nothing asks for, and reads through exactly the same code path it serves on. Targeted at a PC or laptop with at least an 8 GB VRAM GPU on the board. 
@@ -414,6 +414,43 @@ passed. The same command is available through the fork-only Make target:
 make live-probe ARGS="--weights weights --held-out data/val --sweep"
 ```
 
+## Ingesting files on a schedule
+
+**Fork-only.** The ingestion daemon is an addition in this fork, not an upstream
+feature. It is separate from `serve.py`; do not run it against the same
+`weights/` while a server or training run owns that directory.
+
+```bash
+python3 ingestd.py --weights weights \
+    --source ~/notes --source ~/src \
+    --source-rate 4096 --poll 30
+```
+
+Only the sources named with `--source` are read. Directories are walked and
+binary files are skipped, using the same text probe as `train.py read`. A file
+is read in order, and the daemon keeps offsets in
+`runs/ingest_state.json`, so an append reads only the new tail, a rewrite starts
+again at the beginning, and a restart does not re-read everything. The text
+verdict cache is `runs/ingest_index.json`; neither file contains file contents,
+but both contain source paths.
+
+`--source-rate` is characters per minute **per source** (default 4096, about
+two 2048-character steps). `--max-files` and `--max-file-chars` bound one scan.
+The held-out watchdog is the same one `serve.py` uses and is on when
+`data/val` exists; `--gate` / `--no-gate`, `--gate-every`, and the other gate
+flags have the same meaning. A dense step below 2048 characters is refused
+without the gate unless `--allow-ungated-dense` is given.
+
+```bash
+python3 ingestd.py --weights weights --source ~/notes --dry-run
+python3 ingestd.py --weights weights --source ~/notes --once
+make ingest ARGS="--weights weights --source ~/notes --poll 60"
+```
+
+`--dry-run` lists readable files without loading a model. `--once` performs one
+rate-limited scan and saves on exit. The daemon does not grow the pool; it uses
+the loaded checkpoint and the same live learner as the conversation path.
+
 ## Benchmarks
 
 The numbers below are for tracking purposes and move as the run continues. Held-out loss is reported with its standard error, and the size of the evaluation is what sets that error - a difference smaller than it is noise.
@@ -516,7 +553,9 @@ Reading is learning: characters trained on per second. Writing is a reply being 
     python3 serve.py --port 8080             # learns from the conversation
     python3 serve.py --port 8080 --no-learn  # read-only
     ```
-    Then open http://127.0.0.1:8080. Serving writes `weights/` unless `--no-learn` is set; see [Learning from a conversation](#learning-from-a-conversation).
+    Then open http://127.0.0.1:8080. Serving writes `weights/` unless
+    `--no-learn` is set; see [Learning from a conversation](#learning-from-a-conversation)
+    and [Ingesting files on a schedule](#ingesting-files-on-a-schedule).
 
 The run writes a sample log, redraws its graphs as it goes, and checkpoints every few minutes. It is meant to be left alone for days.
 
@@ -555,6 +594,7 @@ minagi/          the model. no command lines here.
   model.py         the transformer: RMSNorm, rotary positions, SwiGLU, flash attention
   decode.py        how a character is chosen, without a random number generator
   ingest.py        turning a pile of files into something to read
+  ingestd.py       scheduled, opt-in file ingestion
   pool.py          the expert pool, and the rules by which it grows and shrinks
   paged.py         the same pool spread over disk, RAM and VRAM
   recur.py         latent recurrence with adaptive depth
@@ -570,6 +610,7 @@ minagi/          the model. no command lines here.
 
 train.py         read | stream | ponder-probe
 serve.py         local web UI
+ingestd.py       ingest opted-in files on a schedule
 replication/     measurement probes (forgetting, live conversation cost)
 config.yaml      the settings worth changing
 corpora/         python3 -m corpora all - the whole corpus, downloaded and made

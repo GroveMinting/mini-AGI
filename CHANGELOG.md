@@ -7,7 +7,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Fork-only live-serving additions. These are not upstream features.
+Fork-only additions. These are not upstream features.
 
 ### Added
 
@@ -19,8 +19,12 @@ Fork-only live-serving additions. These are not upstream features.
   replay through the same learner and gate.
 - `serve.py` flags for the held-out gate, `--learn-context`, the experience log,
   and replay.
-- Tests for the probe, gate, experience/replay, and serve wiring; the suite is
-  now 61 tests (3 CUDA-gated).
+- Tests for the probe, gate, experience/replay, and serve wiring.
+- `ingestd.py` + `minagi/ingestd.py` — opt-in scheduled ingestion of files and
+  directories, per-source rate limits, persistent offsets, and the same
+  held-out gate; `--dry-run` and `--once` for inspection.
+- Tests for ingestion offsets, source opt-in, rate limits, and gate rebinding;
+  the suite is now 73 tests (3 CUDA-gated).
 
 ### Fixed
 
@@ -33,8 +37,8 @@ Fork-only live-serving additions. These are not upstream features.
 - `serve.py` learns by default. With `data/val` present, the held-out gate is on
   by default; a live chunk below 2048 characters is refused unless the gate is
   enabled.
-- `README.md` documents the fork-only live path; `HANDOFF.md` current state
-  refreshed.
+- `README.md` documents the fork-only live and ingestion paths; `HANDOFF.md`
+  current state refreshed.
 
 ## [v0.1.2-mirror] — 2026-10-14
 
