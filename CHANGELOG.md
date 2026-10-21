@@ -20,7 +20,13 @@ Fork-only live-serving additions. These are not upstream features.
 - `serve.py` flags for the held-out gate, `--learn-context`, the experience log,
   and replay.
 - Tests for the probe, gate, experience/replay, and serve wiring; the suite is
-  now 60 tests (3 CUDA-gated).
+  now 61 tests (3 CUDA-gated).
+
+### Fixed
+
+- `PoolKeeper` now protects the checkpoint's original experts from serve-time
+  pruning; a short survival window could previously delete them. Added a test
+  that prunes a stale grown expert while keeping the checkpoint.
 
 ### Changed
 

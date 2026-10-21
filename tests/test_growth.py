@@ -18,8 +18,8 @@ class _Pool:
         self.prune_gone = prune_gone
         self.pruned = []
 
-    def prune(self, step, survival=None):
-        self.pruned.append((step, survival))
+    def prune(self, step, survival=None, protect=0):
+        self.pruned.append((step, survival, protect))
         return self.prune_gone
 
     def n_experts(self):
@@ -57,7 +57,7 @@ class PoolKeeperTest(unittest.TestCase):
         self.assertEqual(out["step"], 60)
         self.assertEqual(out["pruned"], 2)
         self.assertEqual(out["grew"], 3)
-        self.assertEqual(pool.pruned, [(60, 100)])
+        self.assertEqual(pool.pruned, [(60, 100, 3)])
         self.assertEqual(grower.calls, [(1.0, 60)])
         self.assertEqual(len(keeper.events), 1)
 
@@ -135,6 +135,24 @@ class GrowthSaveReloadTest(unittest.TestCase):
             keeper = PoolKeeper(model, learner, grower, survival=1,
                                 base_step=100, every=1, prune=False)
             self.assertIsNone(keeper.after_check(5.0))
+
+    def test_prune_removes_a_grown_expert_but_not_the_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/weights"
+            create(path, verbose=False, experts=3, resident=1, d_ff=8,
+                   depth=1, d_model=8, trunk_d_ff=16, n_head=1, block=16,
+                   max_steps=1, top_k=1)
+            model, _cfg, _pool, _man = T.build_paged(path, "cpu", resident=1,
+                                                     ram_capacity=2)
+            pool = model.pool
+            before = pool.n_experts()
+            pool.add_experts(1, seed_from=0, step=0, birth_gate=0.001)
+            self.assertEqual(pool.n_experts(), before + 1)
+            self.assertNotIn(before, pool.slots)
+            pool.segments = 100
+            gone = pool.prune(step=100, survival=1, protect=before)
+            self.assertEqual(gone, 1)
+            self.assertEqual(pool.n_experts(), before)
 
 
 if __name__ == "__main__":

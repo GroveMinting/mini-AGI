@@ -33,6 +33,7 @@ class PoolKeeper:
         self.grower = grower
         self.survival = int(survival)
         self.base_step = int(base_step)
+        self.protect = int(self.pool.n_experts())
         self.every = max(0, int(every))
         self.prune = bool(prune)
         self.checks = 0
@@ -49,8 +50,8 @@ class PoolKeeper:
         step = self.model_step()
         out = {"step": step, "pruned": 0, "grew": 0}
         if self.prune:
-            out["pruned"] = int(self.pool.prune(step,
-                                                survival=self.survival) or 0)
+            out["pruned"] = int(self.pool.prune(
+                step, survival=self.survival, protect=self.protect) or 0)
         rec = self.grower.step(float(val), self.pool, step)
         out["grew"] = int(rec.get("grew", 0))
         out["reason"] = rec.get("reason", "")
