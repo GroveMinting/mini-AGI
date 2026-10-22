@@ -21,25 +21,27 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
   branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`, whose
   `serve.py`/`LiveLearner` API changes still need a real port.
-- `main` is at `9a02281`, which carries upstream PR #32 (Windows runtime fixes)
-  and the selective `aa9d53f` backport, in addition to the fork-only
-  live-serving, ingestion, self-model, scoped-tool, retention, and soak
-  additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **126 tests**
-  (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
+- `main` is at `324b807`, which carries upstream PR #32 (Windows runtime
+  fixes), the selective `aa9d53f` backport, and the fork-only live-serving,
+  ingestion, self-model, scoped-tool, retention, and soak additions documented
+  in [README.md](README.md). Recent closes: gate/lr persistence `e1816d0`,
+  live-step continuity `5051438`, growth detach `65c3197`, one-writer and
+  retention migration `1a84604`/`5216c33`.
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **133
+  tests** (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
   (`make test-gpu` also runs the CUDA tests on a card); `make smoke` runs the
-  end-to-end path.
+  end-to-end path. Dragon also passes **133 / 1 skipped**.
 - A selective backport of upstream `aa9d53f` was merged into `main` at
   `9a02281`: live rate/plasticity restoration, shared trunk/pool split, and
   spread whole-block held-out evaluation with level migration. Paged
   newborn-rate and lane-scheduler changes are intentionally deferred.
-- Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): CUDA suite **126 pass /
+- Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): CUDA suite **133 pass /
   1 skip**, `make smoke` OK, and all four soak scenarios pass.
   Real-weight calibration on a copied 174-expert checkpoint: old top `0.7279`,
   new spread whole `0.7538`, gate baseline `0.7669 +/-0.1010`; live effective
   rate `1.78e-4` from base `3e-4` and training factor `0.5946`.
-  The P0 follow-up fixes (gate-best persistence and live-save `lr`) are in the
-  working tree on top of `9a02281`, not yet committed.
+  The P0 follow-up fixes (gate-best persistence, live-save `lr`, and
+  `live_steps` continuity) are committed and verified on Dragon.
 - Documentation rule: reconcile `HANDOFF.md`, `DEVPLAN.local.md`, `UPSTREAM.md`,
   and `CHANGELOG.md` at the end of every iteration, before the next one starts.
 - Single-writer enforcement (2026-10-22): `minagi/writer_lock.py` locks a
