@@ -232,8 +232,7 @@ def learn_state():
         return None
     out = {"pending": int(lr_.pending), "chunk": int(lr_.chunk),
            "steps": int(lr_.steps), "lr_scale": round(float(lr_.scale), 4),
-           "model_step": int(lr_.manifest.get("step") or 0)
-           + int(lr_.steps)}
+           "model_step": int(lr_.model_step)}
     g = STATE.get("gate")
     if g:
         out["gate"] = {k: g.get(k) for k in
@@ -439,8 +438,7 @@ def remember(user_text, bot_text):
         keeper = STATE.get("keeper")
         if keeper is not None and keeper.learner is not learner:
             keeper.rebind(STATE["model"], learner,
-                          base_step=int(learner.manifest.get("step")
-                                        or keeper.model_step()))
+                          base_step=int(learner.start_step))
         out["pending"] = int(learner.pending)
         out["chunk"] = int(learner.chunk)
         out["total"] = int(learner.steps)
@@ -451,8 +449,7 @@ def remember(user_text, bot_text):
             exp.append(user_text, bot_text.replace(B1, ""),
                        session=STATE.get("session"), turn=STATE["turn"],
                        steps=learner.steps,
-                       model_step=int(learner.manifest.get("step") or 0)
-                       + int(learner.steps))
+                       model_step=int(learner.model_step))
 
         keeper = STATE.get("keeper")
         if (keeper is not None and out.get("gate")
@@ -465,7 +462,8 @@ def remember(user_text, bot_text):
                     # New and deleted experts only exist in memory until this
                     # save; the rebuild is what gives the learner an optimizer
                     # that names the pool it now has.
-                    learner.manifest["step"] = keeper.model_step()
+                    step = keeper.model_step()
+                    learner.fold_steps(step)
                     learner.save()
                     rebuild = STATE.get("rebuild")
                     if rebuild is None:
@@ -475,8 +473,7 @@ def remember(user_text, bot_text):
                     if watch is not None:
                         watch.rebind(fresh, live)
                     keeper.rebind(fresh, live,
-                                  base_step=int(live.manifest.get("step")
-                                                or keeper.model_step()))
+                                  base_step=int(live.start_step))
                     learner = live
                     out["pool"] = change
             except Exception as e:                            # noqa: BLE001
@@ -507,8 +504,7 @@ def remember(user_text, bot_text):
         out["pending"] = int(learner.pending)
         out["chunk"] = int(learner.chunk)
         out["total"] = int(learner.steps)
-        out["model_step"] = (int(learner.manifest.get("step") or 0)
-                             + int(learner.steps))
+        out["model_step"] = int(learner.model_step)
         return out
     except Exception as e:                                    # noqa: BLE001
         # A failed step must not cost the reply that was already written.
@@ -1315,7 +1311,7 @@ def main():
                              "per-expert ages and on-disk sizes")
         from minagi.growth import PoolKeeper
         from minagi.pool import AutoGrow
-        base_step = int(_manifest(args.weights).get("step") or 0)
+        base_step = int(STATE["learner"].start_step)
         # The checkpoint's experts are the originals for this session: their
         # age starts here, so a short serve cannot judge and delete them.
         pool.born.fill_(float(base_step))

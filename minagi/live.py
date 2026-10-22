@@ -78,6 +78,9 @@ class LiveLearner:
         self.chars0 = float(self.manifest.get("read_chars") or 0.0)
         self.nats0 = float(self.manifest.get("read_nats") or 0.0)
         self.chars, self.nats = 0.0, 0.0
+        # Live steps already folded into the checkpoint's `step` by an
+        # earlier session, and steps taken since this learner opened.
+        self.steps0 = int(self.manifest.get("live_steps") or 0)
         self.aux_weight = aux_weight
         self.save_every = save_every
         self.weights_dir = weights_dir
@@ -165,6 +168,25 @@ class LiveLearner:
         """Training's controller factor on the base rate, or 1 without one."""
         return self.plast.factor() if self.plast is not None else 1.0
 
+    @property
+    def start_step(self):
+        """The model step this learner starts from, including live steps
+        carried in the manifest from an earlier process."""
+        return int(self.manifest.get("step") or 0) + self.steps0
+
+    @property
+    def model_step(self):
+        """The model step including this session's live steps."""
+        return self.start_step + int(self.steps)
+
+    def fold_steps(self, step):
+        """Record that `step` now lives in the checkpoint manifest, and count
+        the session's live steps from zero again. Growth uses this before its
+        save so the new learner does not count the same steps twice."""
+        self.manifest["step"] = int(step)
+        self.steps0 = 0
+        self.steps = 0
+
     def effective_scale(self):
         """The multiplier the optimiser is actually using."""
         return self.scale * self.factor()
@@ -248,6 +270,9 @@ class LiveLearner:
         keep = {k: v for k, v in self.manifest.items() if k not in self.OWN}
         keep.update({"read_chars": int(self.chars0 + self.chars),
                      "read_nats": self.nats0 + self.nats,
+                     # the checkpoint's step is the base; live steps are
+                     # carried separately so a restart can continue counting
+                     "live_steps": int(self.steps0 + self.steps),
                      # an old checkpoint may predate lr in the manifest;
                      # record the base this session actually used
                      "lr": float(self.opt.param_groups[-1]["base_lr"])})

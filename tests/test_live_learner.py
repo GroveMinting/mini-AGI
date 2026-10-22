@@ -113,6 +113,43 @@ class LiveLearnerTest(unittest.TestCase):
             self.assertAlmostEqual(learner.factor(), 0.5)
             self.assertAlmostEqual(learner.effective_scale(), 0.25)
 
+    def test_live_steps_continue_across_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, model, man = _tiny(tmp)
+            man.update({"step": 100, "live_steps": 5, "lr": 0.001})
+            learner = LiveLearner.for_run(
+                model, weights_dir=path, manifest=man, chunk=16, context=32,
+                save_every=0, config={})
+            self.assertEqual(learner.start_step, 105)
+            self.assertEqual(learner.model_step, 105)
+            learner.feed("x" * 16, ByteTokenizer())
+            self.assertEqual(learner.model_step, 106)
+            self.assertTrue(learner.save())
+            with open(os.path.join(path, "manifest.json")) as f:
+                saved = json.load(f)
+            self.assertEqual(saved["step"], 100)
+            self.assertEqual(saved["live_steps"], 6)
+            again = LiveLearner.for_run(
+                model, weights_dir=path, manifest=saved, chunk=16, context=32,
+                save_every=0, config={})
+            self.assertEqual(again.start_step, 106)
+
+    def test_fold_steps_moves_live_steps_into_the_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, model, man = _tiny(tmp)
+            man.update({"step": 100, "live_steps": 5, "lr": 0.001})
+            learner = LiveLearner.for_run(
+                model, weights_dir=path, manifest=man, chunk=16, context=32,
+                save_every=0, config={})
+            learner.fold_steps(106)
+            self.assertEqual(learner.start_step, 106)
+            self.assertEqual(learner.steps, 0)
+            self.assertTrue(learner.save())
+            with open(os.path.join(path, "manifest.json")) as f:
+                saved = json.load(f)
+            self.assertEqual(saved["step"], 106)
+            self.assertEqual(saved["live_steps"], 0)
+
     def test_save_records_base_rate_when_manifest_lacks_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, model, man = _tiny(tmp)

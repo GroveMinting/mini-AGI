@@ -192,7 +192,8 @@ class HeldOutWatchdog:
         if self.retention is None:
             return
         rec = dict(ev)
-        rec["model_step"] = int(self.learner.manifest.get("step") or 0)
+        rec["model_step"] = int(getattr(self.learner, "model_step", 0)
+                                or self.learner.manifest.get("step") or 0)
         rec["live_steps"] = int(self.learner.steps)
         rec["chars"] = self.learner.manifest.get("read_chars")
         try:
