@@ -57,7 +57,12 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 - Growth calibration (bounded, 2026-10-22): 0.92M characters of real corpus,
   17.8 min, normal LR, 174 -> 179 experts (+5) with no prune; held-out
   `0.7706 -> 0.8913` (+0.1207, inside 2 SE). Used `--prune-survival 400000`
-  for the bounded run; the full default-survival run is still pending.
+  for the bounded run.
+- Full default-survival growth run **in progress** since 2026-10-22 on Dragon
+  (PID `9113`): fresh 174-expert copy, 104.28M-character corpus, chunk/context
+  `2048/4096`, normal LR `3e-4`, growth every 2M chars, survival 100M chars.
+  First growth was 174 -> 175 at 3.4 min (~10k chars/s, so roughly 3–5 hours).
+  Artifacts: `/home/jg/aa9d-calib/full-growth-{weights,corpus,logs}`.
 - P0 fresh-baseline soak (2026-10-22): 80 turns / 23 live steps on a fresh copy
   of the 174-expert checkpoint at `9a02281`; three `improved` gate readings,
   no revert or crash, clean shutdown save, and a successful restart.
@@ -127,10 +132,9 @@ Ordered by risk to the next iteration:
 - **Upstream decision: stay selective.** No full `aa9d53f` sync now. The
   remaining work is lane scheduling, paged newborn rates, and performance-only
   code; revisit only if a concrete capability needs it.
-- **Growth calibration.** The bounded 0.92M-character run exercised growth at
-  normal LR (174 -> 179, no prune). Still run a full default-survival
-  growth/prune sequence before deciding whether serve-time growth stays
-  experimental.
+- **Growth calibration.** The bounded run exercised growth at normal LR
+  (174 -> 179, no prune); the full default-survival run is in progress on
+  Dragon. Decide whether serve-time growth stays experimental when it lands.
 - **Operational hardening.** The `live_steps` restart path, single-writer
   enforcement, and retention instrument migration are done.
 - **Scope decision.** Decide whether “improve the codebase itself” is a real
