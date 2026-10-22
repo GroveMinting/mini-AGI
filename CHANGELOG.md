@@ -45,6 +45,10 @@ Fork-only additions. These are not upstream features.
   a crash before the manifest, disk full, prune ordering, and retry/resume.
 - Tests for interrupted saves, disk-full retry, prune ordering, the retention
   log and summary, and watchdog recording.
+- Upstream PR #32: Windows UTF-8 log writers, direct plot spawning without
+  `bash`, and a retrying checkpoint replace for transient reader locks. The
+  retry helper is integrated with the fork's manifest writer and keeps temp
+  cleanup on failure.
 
 ### Fixed
 
@@ -55,7 +59,7 @@ Fork-only additions. These are not upstream features.
   the revert limit is the smaller of `--gate-factor` and three standard
   errors. At four 512-character chunks the old 3-SE floor was ~11%, so a
   160-turn real-weight soak drifted from 0.8031 to 0.8903 without reverting.
-  Added a regression test; the suite is now 102 tests (3 CUDA-gated).
+  Added a regression test; the suite is now 112 tests (3 CUDA-gated).
 - `serve.py` now rebinds `PoolKeeper` after a gate revert, before the next
   prune/grow decision. It previously kept pointing at the pre-revert pool and
   learner, so a later change could act on state that had just been restored.
@@ -63,6 +67,9 @@ Fork-only additions. These are not upstream features.
 - Pruned expert files are deleted only after the new manifest is durable. An
   interrupted prune can no longer leave the old manifest naming a removed
   file; stale extra files are harmless and are removed on the next save.
+- Windows checkpoint publications retry transient `PermissionError` reader
+  locks, and log/sample writers are explicitly UTF-8 rather than using the
+  locale encoding.
 
 ### Changed
 
@@ -72,6 +79,9 @@ Fork-only additions. These are not upstream features.
 - `README.md` documents the fork-only live, ingestion, self-model, scoped
   tool, retention, soak, and experimental serve-time growth paths;
   `HANDOFF.md` and `UPSTREAM.md` refreshed.
+- The fork is now maintained directly. Upstream has not been merging community
+  PRs, so fixes and features land on `main`; upstream PR #34 was closed and
+  upstream PR #32 is carried locally.
 
 ## [v0.1.2-mirror] — 2026-10-14
 

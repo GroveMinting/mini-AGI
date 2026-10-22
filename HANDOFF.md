@@ -18,12 +18,14 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 ## Current state
 
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
-  (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`).
-- Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
-  fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
-  soak additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **102 tests**
-  (99 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+  (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
+  branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`, whose
+  `serve.py`/`LiveLearner` API changes still need a real port.
+- `main` is at `74bec51`, which carries upstream PR #32 (Windows runtime fixes)
+  in addition to the unreleased fork-only live-serving, ingestion, self-model,
+  scoped-tool, retention, and soak additions documented in [README.md](README.md).
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **112 tests**
+  (109 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass. The fork-only live,
@@ -81,8 +83,10 @@ Ordered for GPU work:
 
 - **Training run.** Start a short real run to exercise growth/pruning/continual
   learning on the card.
-- **Upstream outreach** (open PRs, issue reporters). Deliberately **not** done; a
-  public-communication decision for the owner.
+- **Port to upstream `aa9d53f`.** Upstream's optimization commit changes the
+  live/`LiveLearner` and paged APIs; the fork's M1-M3 commits need adaptation,
+  not a textual rebase. Upstream PR #32 is already carried; PR #34 was closed
+  when upstream stopped merging community PRs.
 
 Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
 superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
@@ -91,7 +95,10 @@ test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
 `tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
 experience/replay), the ingestion daemon, the self-knowledge rebuild tool, the
 scoped tool registry and receipt ledger, the retention log/dashboard, the
-fault-injection soak, and its 102-test suite; and this documentation pass.
+fault-injection soak, and its then-102-test suite; upstream PR #32 (Windows UTF-8
+logs, direct plot spawns, retrying checkpoint replace) integrated with the
+fork's manifest writer at `74bec51`; and this documentation pass. The suite is
+now 112 tests.
 
 ## Risks / open questions
 

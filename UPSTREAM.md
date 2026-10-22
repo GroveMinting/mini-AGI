@@ -9,7 +9,15 @@ the current upstream, with the smallest possible patch surface.
 
 It is not affiliated with, endorsed by, or a replacement for upstream. Model
 architecture, training, benchmarks and the continual-learning results are
-upstream's work — go there for those, and open model/training issues there.
+upstream's work — go there for those.
+
+**Maintenance policy (2026-10-22).** Upstream has not been merging community
+pull requests, so this fork is now maintained directly rather than waiting for
+upstream. Correctness and feature work both land on the fork's `main`; upstream
+PRs are optional references, not a merge path. PR #34 was closed for this
+reason. Upstream PR #32 (Windows runtime fixes) is carried in the fork as
+commit `74bec51`, with its retry helper integrated into the fork's manifest
+writer.
 
 ## Synced to
 
@@ -18,6 +26,12 @@ upstream's work — go there for those, and open model/training issues there.
 (mirror tag `upstream-20261014`; the previous checkpoint `60f7ae3` is kept as
 `upstream-20261014-1`). The exported `patches/` apply to exactly this commit;
 see the bottom of [`HARDENING.md`](HARDENING.md).
+
+The upstream mirror branch is at `95e901e`; upstream `main` has since advanced
+to `aa9d53f` ("optimization work + cropped evaluation fix"). That sync is
+pending: its API changes in `serve.py`/`LiveLearner` conflict with the fork's
+M1-M3 commits and need a real port, not a textual merge. Until then the fork
+runs on the `ce31731` base plus carried fixes.
 
 ## Branch model
 
@@ -57,9 +71,9 @@ with `UPSTREAM_REMOTE=<name> make sync`.
 ## Fork-only candidates for upstream
 
 The exported `patches/` are the correctness series; the live, ingestion,
-self-model, and scoped-tool work on `main` is not in it. No external pull
-request has been opened from this checkout. The handoff list, in order of
-readiness, is:
+self-model, and scoped-tool work on `main` is not in it. These are now
+fork-only changes, not a queue waiting on upstream. In rough order of
+readiness if upstream ever becomes responsive:
 
 1. **Checkpoint prune ordering (M7).** Publish the manifest before deleting
    stale expert files, so an interrupted prune cannot leave the old manifest
@@ -67,10 +81,11 @@ readiness, is:
    `tests/test_soak.py`; it is the strongest candidate for a separate upstream
    PR. It currently lives on `main`, not on `hardening`.
 
-   **Prepared handoff:** commit `858093c` is the candidate. The full diff
-   (store + soak + test) applies cleanly to `ce31731` and the current mirror
-   `95e901e`, and its three `test_soak.py` cases pass on both. No generated
-   patch is tracked. No external PR has been opened. Produce the full or
+   **Status:** upstream PR #34 was opened and then closed when upstream stopped
+   merging community PRs. The fix is carried on `main` (`858093c`), now
+   integrated with #32's retrying `_replace` helper in `74bec51`. The full diff
+   (store + soak + test) originally applied cleanly to `ce31731` and `95e901e`,
+   and its three `test_soak.py` cases passed on both. Produce the full or
    store-only diff with:
 
    ```sh
@@ -89,9 +104,9 @@ readiness, is:
    Behavior-changing or corpus-policy changes; each needs its own long-run
    evidence and should not ride on the correctness series.
 
-Local acceptance for the fork-only set is the 102-test CPU/CUDA suite plus
-`scripts/soak.py` and the retention dashboard. None of it is a substitute for
-upstream review.
+Local acceptance for the fork-only set is the 112-test CPU/CUDA suite plus
+`scripts/soak.py` and the retention dashboard. Upstream review is no longer a
+gate.
 
 ## Running it
 
