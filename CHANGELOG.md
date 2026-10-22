@@ -65,6 +65,10 @@ Fork-only additions. These are not upstream features.
   earlier better snapshot instead of overwriting it with the new session's
   baseline. `LiveLearner.save()` also records the base `lr` when the source
   checkpoint predates it. Added tests for both.
+- Live step accounting now survives restart: saves carry `live_steps`, the
+  learner reports `start_step`/`model_step`, and `PoolKeeper` starts from the
+  carried count. Growth folds the live count into the checkpoint step before
+  saving, so a rebuild does not count those steps twice.
 - `PoolKeeper` now protects the checkpoint's original experts from serve-time
   pruning; a short survival window could previously delete them. Added a test
   that prunes a stale grown expert while keeping the checkpoint.
@@ -96,7 +100,7 @@ Fork-only additions. These are not upstream features.
 - The fork is now maintained directly. Upstream has not been merging community
   PRs, so fixes and features land on `main`; upstream PR #34 was closed and
   upstream PR #32 is carried locally.
-- The suite is now **124 tests** (4 skipped on CPU; 3 CUDA-gated).
+- The suite is now **126 tests** (4 skipped on CPU; 3 CUDA-gated).
 
 ## [v0.1.2-mirror] — 2026-10-14
 
