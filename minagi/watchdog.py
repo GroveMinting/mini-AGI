@@ -105,6 +105,9 @@ class HeldOutWatchdog:
         self.chunk = max(8, min(int(chunk), self.context))
         self.chunks = max(1, int(chunks))
         self.spread = bool(spread)
+        self.instrument = {"held_out": self.held_out, "chunk": self.chunk,
+                           "context": self.context, "chunks": self.chunks,
+                           "spread": self.spread}
         self.factor = float(factor)
         self.rebuild = rebuild
         self.verbose = verbose
@@ -196,6 +199,10 @@ class HeldOutWatchdog:
                                 or self.learner.manifest.get("step") or 0)
         rec["live_steps"] = int(self.learner.steps)
         rec["chars"] = self.learner.manifest.get("read_chars")
+        inst = dict(self.instrument)
+        if isinstance(rec.get("domains"), dict):
+            inst["domains"] = sorted(rec["domains"])
+        rec["instrument"] = inst
         try:
             self.retention.append(rec)
         except OSError as e:

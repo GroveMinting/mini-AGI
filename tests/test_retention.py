@@ -8,7 +8,8 @@ import unittest
 
 import torch
 
-from minagi.retention import RetentionLog, load, summary
+from minagi.retention import (RetentionLog, instrument_key, load,
+                              summary)
 from minagi.watchdog import HeldOutWatchdog
 
 
@@ -71,6 +72,22 @@ class RetentionLogTest(unittest.TestCase):
     def test_summary_of_nothing_is_empty(self):
         self.assertEqual(summary([])["with_domains"], 0)
 
+    def test_instrument_change_starts_a_new_baseline(self):
+        rows = [
+            {"action": "baseline", "at": 1, "domains": {"chat": 1.0}},
+            {"action": "ok", "at": 2, "domains": {"chat": 1.1}},
+            {"action": "baseline", "at": 3, "domains": {"chat": 2.0},
+             "instrument": {"chunk": 512, "context": 512}},
+            {"action": "ok", "at": 4, "domains": {"chat": 1.9},
+             "instrument": {"chunk": 512, "context": 512}},
+        ]
+        self.assertEqual(instrument_key(rows[0]), "legacy")
+        s = summary(rows)
+        self.assertEqual(s["segments"], 2)
+        self.assertEqual(s["domains"]["chat"]["first"], 2.0)
+        self.assertAlmostEqual(s["domains"]["chat"]["delta"], -0.1)
+        self.assertEqual(s["all_first_at"], 1)
+
 
 class WatchdogRetentionTest(unittest.TestCase):
     def test_gate_events_are_written_with_domains_and_steps(self):
@@ -102,6 +119,10 @@ class WatchdogRetentionTest(unittest.TestCase):
             self.assertEqual(rows[2]["live_steps"], 14)
             self.assertEqual(rows[0]["domains"], {"chat": 0.5, "code": 0.6})
             self.assertEqual(rows[0]["chars"], 12345)
+            self.assertEqual(rows[0]["instrument"]["chunk"], 16)
+            self.assertEqual(rows[0]["instrument"]["context"], 16)
+            self.assertEqual(rows[0]["instrument"]["domains"],
+                             ["chat", "code"])
             self.assertEqual(wd.state()["retention_log"], log)
 
 

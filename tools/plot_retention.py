@@ -24,15 +24,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from minagi.retention import load, summary                     # noqa: E402
+from minagi.retention import instrument_key, load, summary      # noqa: E402
 
 INK, MUTED, GRID = "#1b1b1f", "#6b6b76", "#e4e4ea"
 GOOD, BAD, WORK = "#2ca25f", "#c2492d", "#2b7bba"
 BASELINE, MARK = "#8c564b", "#d9a326"
 
 
-def segments(xs):
-    cut = [0] + [i for i in range(1, len(xs)) if xs[i] < xs[i - 1]] + [len(xs)]
+def segments(xs, rows=None):
+    cut = [0]
+    for i in range(1, len(xs)):
+        if xs[i] < xs[i - 1]:
+            cut.append(i)
+        elif (rows is not None
+              and instrument_key(rows[i]) != instrument_key(rows[i - 1])):
+            cut.append(i)
+    cut.append(len(xs))
     return [slice(cut[i], cut[i + 1]) for i in range(len(cut) - 1)]
 
 
@@ -87,7 +94,7 @@ def main():
         if not rows:
             print(f"  nothing in the last {a.last:.1f}M characters")
             return 1
-    segs = segments(x)
+    segs = segments(x, rows)
     names = domain_names(rows)
     cmap = plt.get_cmap("tab10")
     val = np.array([float(r.get("val", np.nan)) if r.get("val") is not None
