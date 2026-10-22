@@ -32,6 +32,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 import numpy as np
 import torch
@@ -75,6 +76,23 @@ class WeightShadow:
 def shadow(path):
     """Return temporary storage for a dry read of a weights directory."""
     return WeightShadow(path)
+
+
+def _replace(tmp, dst, attempts=8):
+    """Retry transient Windows reader locks while keeping publication atomic.
+
+    Readers opened without delete sharing can block os.replace on Windows.
+    Eight attempts allow 6.35 seconds of backoff; persistent permission
+    failures are re-raised, and other errors propagate immediately.
+    """
+    for i in range(attempts):
+        try:
+            os.replace(tmp, dst)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.05 * 2 ** i)
 
 
 def _is_expert(key):
@@ -304,7 +322,7 @@ def _savez(path, arrays):
     tmp = path + ".tmp.npz"
     try:
         np.savez(tmp, **arrays)
-        os.replace(tmp, path)
+        _replace(tmp, path)
     except BaseException:
         try:
             os.remove(tmp)
@@ -322,7 +340,7 @@ def _write_manifest(path, manifest):
             json.dump(manifest, f, indent=1)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, os.path.join(path, "manifest.json"))
+        _replace(tmp, os.path.join(path, "manifest.json"))
     except BaseException:
         try:
             os.remove(tmp)
