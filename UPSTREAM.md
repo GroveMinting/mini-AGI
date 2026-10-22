@@ -29,9 +29,9 @@ see the bottom of [`HARDENING.md`](HARDENING.md).
 
 The upstream mirror branch is at `95e901e`; upstream `main` has since advanced
 to `aa9d53f` ("optimization work + cropped evaluation fix"). A selective
-backport of its high-value pieces is implemented on
-`feature/aa9d-selective`: live rate restoration, shared trunk/pool splitting,
-and spread whole-block held-out evaluation with level migration. The lane scheduler, paged newborn-rate
+backport of its high-value pieces was merged into `main` at `9a02281`: live rate
+restoration, shared trunk/pool splitting, and spread whole-block held-out
+evaluation with level migration. The lane scheduler, paged newborn-rate
 optimisation, and performance-only changes are deliberately not ported; a full
 `aa9d53f` sync still needs a real port of the `serve.py`/`LiveLearner` API.
 

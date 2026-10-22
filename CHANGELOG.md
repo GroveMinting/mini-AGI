@@ -49,11 +49,11 @@ Fork-only additions. These are not upstream features.
   `bash`, and a retrying checkpoint replace for transient reader locks. The
   retry helper is integrated with the fork's manifest writer and keeps temp
   cleanup on failure.
-- Selective backport from upstream `aa9d53f`: the live learner restores the
-  run's base `lr` and `Plasticity` state, keeps fields it does not own when it
-  saves, and uses training's trunk/pool split. `serve.py` opens it through
-  `LiveLearner.for_run`; the effective rate is the base rate times the training
-  factor times the live gate scale.
+- Selective backport from upstream `aa9d53f`, merged at `9a02281`: the live
+  learner restores the run's base `lr` and `Plasticity` state, keeps fields it
+  does not own when it saves, and uses training's trunk/pool split. `serve.py`
+  opens it through `LiveLearner.for_run`; the effective rate is the base rate
+  times the training factor times the live gate scale.
 - Held-out evaluation now reads whole blocks spread over each subject, and the
   sample log records the session's level plus the old top-of-file and
   part-block readings so old entries can be moved onto it. Checks report at the
@@ -61,6 +61,10 @@ Fork-only additions. These are not upstream features.
 
 ### Fixed
 
+- `HeldOutWatchdog.start()` now reads a compatible `gate.json` and keeps an
+  earlier better snapshot instead of overwriting it with the new session's
+  baseline. `LiveLearner.save()` also records the base `lr` when the source
+  checkpoint predates it. Added tests for both.
 - `PoolKeeper` now protects the checkpoint's original experts from serve-time
   pruning; a short survival window could previously delete them. Added a test
   that prunes a stale grown expert while keeping the checkpoint.
@@ -92,7 +96,7 @@ Fork-only additions. These are not upstream features.
 - The fork is now maintained directly. Upstream has not been merging community
   PRs, so fixes and features land on `main`; upstream PR #34 was closed and
   upstream PR #32 is carried locally.
-- The suite is now **122 tests** (4 skipped on CPU; 3 CUDA-gated).
+- The suite is now **124 tests** (4 skipped on CPU; 3 CUDA-gated).
 
 ## [v0.1.2-mirror] — 2026-10-14
 

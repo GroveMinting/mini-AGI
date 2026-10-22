@@ -21,21 +21,36 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
   branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`, whose
   `serve.py`/`LiveLearner` API changes still need a real port.
-- `main` is at `e8e2883`, which carries upstream PR #32 (Windows runtime fixes)
-  in addition to the unreleased fork-only live-serving, ingestion, self-model,
-  scoped-tool, retention, and soak additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **122 tests**
+- `main` is at `9a02281`, which carries upstream PR #32 (Windows runtime fixes)
+  and the selective `aa9d53f` backport, in addition to the fork-only
+  live-serving, ingestion, self-model, scoped-tool, retention, and soak
+  additions documented in [README.md](README.md).
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **124 tests**
   (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
   (`make test-gpu` also runs the CUDA tests on a card); `make smoke` runs the
   end-to-end path.
-- A selective backport of upstream `aa9d53f` is on `feature/aa9d-selective`:
-  live rate/plasticity restoration, shared trunk/pool split, and spread
-  whole-block held-out evaluation with level migration. Paged newborn-rate and
-  lane-scheduler changes are intentionally deferred.
-- Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
-  `make smoke`, and the CUDA test tier all pass. The fork-only live,
-  ingestion, self-model, scoped-tool, retention, and interrupted-save paths are
-  covered by the test suite; the live path was exercised on real weights.
+- A selective backport of upstream `aa9d53f` was merged into `main` at
+  `9a02281`: live rate/plasticity restoration, shared trunk/pool split, and
+  spread whole-block held-out evaluation with level migration. Paged
+  newborn-rate and lane-scheduler changes are intentionally deferred.
+- Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): CUDA suite **124 pass /
+  1 skip**, `make smoke` OK, and all four soak scenarios pass.
+  Real-weight calibration on a copied 174-expert checkpoint: old top `0.7279`,
+  new spread whole `0.7538`, gate baseline `0.7669 +/-0.1010`; live effective
+  rate `1.78e-4` from base `3e-4` and training factor `0.5946`.
+  The P0 follow-up fixes (gate-best persistence and live-save `lr`) are in the
+  working tree on top of `9a02281`, not yet committed.
+- Documentation rule: reconcile `HANDOFF.md`, `DEVPLAN.local.md`, `UPSTREAM.md`,
+  and `CHANGELOG.md` at the end of every iteration, before the next one starts.
+- P0 fresh-baseline soak (2026-10-22): 80 turns / 23 live steps on a fresh copy
+  of the 174-expert checkpoint at `9a02281`; three `improved` gate readings,
+  no revert or crash, clean shutdown save, and a successful restart.
+  Baseline `0.9095`, best `0.9006`, final `0.9070`; artifacts under
+  `/home/jg/aa9d-calib/p0-*`. Restart reloaded 82 exchanges but reset the gate
+  baseline (`0.9096`) and `model_step` (`223506`). The gate-baseline loss was
+  fixed immediately: `start()` now keeps a compatible better `gate.json` snapshot.
+  Live saves now also record the base `lr` when the source manifest lacked it.
+  `model_step` restart accounting remains the open P1 item.
 - `main` (default) is `hardening` (upstream + patch commits) plus the mirror
   scaffolding and the fork-only live-serving, ingestion, self-model,
   scoped-tool, retention, and soak additions. These additions are not upstream
@@ -84,15 +99,25 @@ and one learning step before trusting a run.
 
 ## Backlog
 
-Ordered for GPU work:
+Ordered by risk to the next iteration:
 
-- **Training run.** Start a short real run to exercise growth/pruning/continual
-  learning on the card.
-- **Validate the `aa9d53f` selective backport on Dragon.** The feature branch
-  is implemented on CPU; run the CUDA suite, smoke, soak, and re-baseline the
-  live gate on a copied real checkpoint. Full upstream sync still needs a
-  deliberate `serve.py`/`LiveLearner` API port and is not required for this
-  backport.
+- **P1 model-step accounting.** Preserve the live model-step counter across
+  restart without double-counting with `PoolKeeper`; the gate-best and manifest
+  `lr` parts of the P0 finding are fixed.
+- **P1 operational hardening.** Add single-writer enforcement, define
+  retention migration/marking, and close the P0 restart accounting findings.
+- **Orin disposition: short checks only.** Do not target Orin for long or
+  unattended gate/replay soaks; use Dragon.
+- **Upstream decision.** Decide whether full `aa9d53f` sync is worth the
+  `serve.py`/`LiveLearner` port, or whether the fork stays selective. The
+  remaining upstream work is lane scheduling, paged newborn rates, and
+  performance-only changes.
+- **Growth calibration.** Exercise growth/prune at normal learning rate long
+  enough to decide whether serve-time growth stays experimental.
+- **Operational hardening.** Address single-writer enforcement, retention
+  baseline migration, and the stale `model_step` observation from the Orin run.
+- **Scope decision.** Decide whether “improve the codebase itself” is a real
+  autonomous goal or an operator-assisted maintenance workflow.
 
 Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
 superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
@@ -104,9 +129,10 @@ scoped tool registry and receipt ledger, the retention log/dashboard, the
 fault-injection soak, and its then-102-test suite; upstream PR #32 (Windows UTF-8
 logs, direct plot spawns, retrying checkpoint replace) integrated with the
 fork's manifest writer at `74bec51`; and this documentation pass. The suite is
-now 122 tests. The selective `aa9d53f` backport (live rate/manifest, shared
-trunk/pool split, spread whole-block held-out with level banners) is implemented
-and CPU-tested; Dragon validation remains.
+now 124 tests. The selective `aa9d53f` backport (live rate/manifest, shared
+trunk/pool split, spread whole-block held-out with level banners) is merged at
+`9a02281` and validated on Dragon. P0 soak accounting is closed except for the
+live `model_step` continuation.
 
 ## Risks / open questions
 
