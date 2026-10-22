@@ -42,6 +42,9 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   working tree on top of `9a02281`, not yet committed.
 - Documentation rule: reconcile `HANDOFF.md`, `DEVPLAN.local.md`, `UPSTREAM.md`,
   and `CHANGELOG.md` at the end of every iteration, before the next one starts.
+- Live-step restart verified on Dragon (2026-10-22): one session step saved
+  `live_steps=1` with base step `223506`; restarting reported
+  `model_step=223507`, so the counter continues without double-counting.
 - Growth calibration (bounded, 2026-10-22): 0.92M characters of real corpus,
   17.8 min, normal LR, 174 -> 179 experts (+5) with no prune; held-out
   `0.7706 -> 0.8913` (+0.1207, inside 2 SE). Used `--prune-survival 400000`
@@ -119,8 +122,7 @@ Ordered by risk to the next iteration:
   growth/prune sequence before deciding whether serve-time growth stays
   experimental.
 - **Operational hardening.** Address single-writer enforcement and retention
-  baseline migration; verify the new `live_steps` restart path in the next
-  real-weight session.
+  baseline migration. The `live_steps` restart path is verified.
 - **Scope decision.** Decide whether “improve the codebase itself” is a real
   autonomous goal or an operator-assisted maintenance workflow.
 
