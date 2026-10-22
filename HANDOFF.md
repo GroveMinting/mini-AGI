@@ -107,10 +107,9 @@ Ordered by risk to the next iteration:
   retention migration/marking, and close the P0 restart accounting findings.
 - **Orin disposition: short checks only.** Do not target Orin for long or
   unattended gate/replay soaks; use Dragon.
-- **Upstream decision.** Decide whether full `aa9d53f` sync is worth the
-  `serve.py`/`LiveLearner` port, or whether the fork stays selective. The
-  remaining upstream work is lane scheduling, paged newborn rates, and
-  performance-only changes.
+- **Upstream decision: stay selective.** No full `aa9d53f` sync now. The
+  remaining work is lane scheduling, paged newborn rates, and performance-only
+  code; revisit only if a concrete capability needs it.
 - **Growth calibration.** Exercise growth/prune at normal learning rate long
   enough to decide whether serve-time growth stays experimental.
 - **Operational hardening.** Address single-writer enforcement and retention

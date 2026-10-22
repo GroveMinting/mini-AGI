@@ -35,6 +35,12 @@ evaluation with level migration. The lane scheduler, paged newborn-rate
 optimisation, and performance-only changes are deliberately not ported; a full
 `aa9d53f` sync still needs a real port of the `serve.py`/`LiveLearner` API.
 
+**Decision (2026-10-22): stay selective.** The fork will not do a full
+`aa9d53f` sync now. The remaining pieces are primarily a behavior-changing lane
+scheduler, paged newborn-rate optimisation, and performance-only work; the
+fork's live/held-out path already carries the high-value fixes. Revisit this
+only if a concrete capability depends on the remaining upstream API.
+
 ## Branch model
 
 | Ref | What it is |
