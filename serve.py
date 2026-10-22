@@ -56,6 +56,7 @@ from flask import Flask, Response, jsonify, request
 
 from minagi.recur import load_any
 from minagi.tokenizer import ByteTokenizer
+from minagi.writer_lock import WriterBusy, writer_lock
 
 app = Flask(__name__)
 
@@ -77,6 +78,7 @@ U0, U1, B0, B1 = "<user>", "</user>", "<bot>", "</bot>"
 # A passage of the corpus the conversation opens with. Empty when priming is
 # off or no corpus is on disk.
 PRIME = ""
+WRITER_LOCK = None
 
 
 def load_prime(chars, root="data/train/self-knowledge"):
@@ -141,6 +143,10 @@ def _manifest(path):
 
 def load(weights, device=None, learn=True, lr=None, save_every=8,
          chunk=None, context=0):
+    global WRITER_LOCK
+    if learn and WRITER_LOCK is None:
+        WRITER_LOCK = writer_lock(weights, "serve.py live learning")
+        atexit.register(WRITER_LOCK.release)
     dev = torch.device(device) if device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu")
     # read_only marks nothing dirty, so an expert paged in is never written
@@ -1180,10 +1186,13 @@ def main():
               f"read-only.\n")
     if args.learn_context < 0:
         raise SystemExit("--learn-context must be 0 or more")
-    model = load(args.weights, args.device, learn=args.learn,
-                 lr=args.learn_lr, save_every=args.save_every,
-                 chunk=args.learn_chunk,
-                 context=args.learn_context or None)
+    try:
+        model = load(args.weights, args.device, learn=args.learn,
+                     lr=args.learn_lr, save_every=args.save_every,
+                     chunk=args.learn_chunk,
+                     context=args.learn_context or None)
+    except WriterBusy as e:
+        raise SystemExit(f"cannot start live learning: {e}") from None
     if PRIME:
         print(f"  primed with {len(PRIME)} characters of self-knowledge")
     pool = getattr(model, "pool", None)

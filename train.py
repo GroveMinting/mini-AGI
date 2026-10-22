@@ -611,7 +611,12 @@ def _truncate_history(path, chars):
 
 def cmd_read(args):
     if args.save:
-        return _cmd_read(args)
+        from minagi.writer_lock import WriterBusy, writer_lock
+        try:
+            with writer_lock(args.weights_dir, "train.py read --save"):
+                return _cmd_read(args)
+        except WriterBusy as e:
+            raise SystemExit(f"cannot save: {e}") from None
     with weights_store.shadow(args.weights_dir) as dry_shadow:
         return _cmd_read(args, dry_shadow)
 

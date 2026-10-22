@@ -1,5 +1,6 @@
 """Scheduled, opt-in ingestion of text files into the live learner."""
 
+import atexit
 import json
 import os
 import signal
@@ -431,6 +432,12 @@ def main(argv=None):
 
     if not os.path.exists(os.path.join(args.weights, "core.npz")):
         ap.error(f"no model in {args.weights}; train one first")
+    from .writer_lock import WriterBusy, writer_lock
+    try:
+        lock = writer_lock(args.weights, "ingestd")
+    except WriterBusy as e:
+        ap.error(str(e))
+    atexit.register(lock.release)
     model, learner, rebuild, dev = _build(sources, args)
     print(f"[ingest] {len(sources)} source(s), {args.source_rate} chars/min "
           f"each, poll {args.poll:g}s, step {learner.chunk}", file=sys.stderr)
