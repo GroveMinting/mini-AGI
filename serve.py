@@ -440,8 +440,15 @@ def remember(user_text, bot_text):
                 print(f"[gate] failed: {e}", file=sys.stderr)
                 out["gate_error"] = str(e)
 
-        # A gate revert may have rebuilt the model and learner.
+        # A gate revert may have rebuilt the model and learner. The keeper
+        # still points at the pre-revert pool; rebind it before the next
+        # prune/grow decision so that decision acts on the restored model.
         learner = STATE.get("learner") or learner
+        keeper = STATE.get("keeper")
+        if keeper is not None and keeper.learner is not learner:
+            keeper.rebind(STATE["model"], learner,
+                          base_step=int(learner.manifest.get("step")
+                                        or keeper.model_step()))
         out["pending"] = int(learner.pending)
         out["chunk"] = int(learner.chunk)
         out["total"] = int(learner.steps)
@@ -462,6 +469,7 @@ def remember(user_text, bot_text):
             try:
                 change = keeper.after_check(out["gate"]["val"])
                 if change:
+                    print(f"  [pool] {change}", file=sys.stderr)
                     # New and deleted experts only exist in memory until this
                     # save; the rebuild is what gives the learner an optimizer
                     # that names the pool it now has.
