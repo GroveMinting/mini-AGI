@@ -21,12 +21,17 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
   branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`, whose
   `serve.py`/`LiveLearner` API changes still need a real port.
-- `main` is at `74bec51`, which carries upstream PR #32 (Windows runtime fixes)
+- `main` is at `e8e2883`, which carries upstream PR #32 (Windows runtime fixes)
   in addition to the unreleased fork-only live-serving, ingestion, self-model,
   scoped-tool, retention, and soak additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **112 tests**
-  (109 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
-  the CUDA tests on a card); `make smoke` runs the end-to-end path.
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **122 tests**
+  (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
+  (`make test-gpu` also runs the CUDA tests on a card); `make smoke` runs the
+  end-to-end path.
+- A selective backport of upstream `aa9d53f` is on `feature/aa9d-selective`:
+  live rate/plasticity restoration, shared trunk/pool split, and spread
+  whole-block held-out evaluation with level migration. Paged newborn-rate and
+  lane-scheduler changes are intentionally deferred.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass. The fork-only live,
   ingestion, self-model, scoped-tool, retention, and interrupted-save paths are
@@ -83,10 +88,11 @@ Ordered for GPU work:
 
 - **Training run.** Start a short real run to exercise growth/pruning/continual
   learning on the card.
-- **Port to upstream `aa9d53f`.** Upstream's optimization commit changes the
-  live/`LiveLearner` and paged APIs; the fork's M1-M3 commits need adaptation,
-  not a textual rebase. Upstream PR #32 is already carried; PR #34 was closed
-  when upstream stopped merging community PRs.
+- **Validate the `aa9d53f` selective backport on Dragon.** The feature branch
+  is implemented on CPU; run the CUDA suite, smoke, soak, and re-baseline the
+  live gate on a copied real checkpoint. Full upstream sync still needs a
+  deliberate `serve.py`/`LiveLearner` API port and is not required for this
+  backport.
 
 Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
 superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
@@ -98,7 +104,9 @@ scoped tool registry and receipt ledger, the retention log/dashboard, the
 fault-injection soak, and its then-102-test suite; upstream PR #32 (Windows UTF-8
 logs, direct plot spawns, retrying checkpoint replace) integrated with the
 fork's manifest writer at `74bec51`; and this documentation pass. The suite is
-now 112 tests.
+now 122 tests. The selective `aa9d53f` backport (live rate/manifest, shared
+trunk/pool split, spread whole-block held-out with level banners) is implemented
+and CPU-tested; Dragon validation remains.
 
 ## Risks / open questions
 

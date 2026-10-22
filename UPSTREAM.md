@@ -28,10 +28,12 @@ writer.
 see the bottom of [`HARDENING.md`](HARDENING.md).
 
 The upstream mirror branch is at `95e901e`; upstream `main` has since advanced
-to `aa9d53f` ("optimization work + cropped evaluation fix"). That sync is
-pending: its API changes in `serve.py`/`LiveLearner` conflict with the fork's
-M1-M3 commits and need a real port, not a textual merge. Until then the fork
-runs on the `ce31731` base plus carried fixes.
+to `aa9d53f` ("optimization work + cropped evaluation fix"). A selective
+backport of its high-value pieces is implemented on
+`feature/aa9d-selective`: live rate restoration, shared trunk/pool splitting,
+and spread whole-block held-out evaluation with level migration. The lane scheduler, paged newborn-rate
+optimisation, and performance-only changes are deliberately not ported; a full
+`aa9d53f` sync still needs a real port of the `serve.py`/`LiveLearner` API.
 
 ## Branch model
 
@@ -104,7 +106,7 @@ readiness if upstream ever becomes responsive:
    Behavior-changing or corpus-policy changes; each needs its own long-run
    evidence and should not ride on the correctness series.
 
-Local acceptance for the fork-only set is the 112-test CPU/CUDA suite plus
+Local acceptance for the fork-only set is the 122-test CPU/CUDA suite plus
 `scripts/soak.py` and the retention dashboard. Upstream review is no longer a
 gate.
 

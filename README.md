@@ -383,8 +383,15 @@ every 32 live steps, and restores the snapshot (halving the learning rate) when
 held-out is worse than the best by `--gate-factor` (default 1.10x) or by
 three evaluation standard errors, whichever is smaller. The factor is a hard
 material cap; the standard-error term can only tighten it, so a noisy
-evaluation cannot widen the guard. `--held-out` chooses another directory;
-`--no-gate` removes the guard.
+evaluation cannot widen the guard. Gate readings use whole blocks spread over
+each subject, the same sampling as training's checks. `--held-out` chooses
+another directory; `--no-gate` removes the guard.
+
+The live learner continues training's rate: it reads the checkpoint's base
+`lr` and `Plasticity` state, then the gate's scale multiplies that. `--learn-lr`
+overrides only the base rate; omit it to use the rate the run itself used. The
+manifest and controller state are written back on every live save, so a restart
+does not silently reset them.
 
 The default live step is `training.chunk` (2048 characters). A lower
 `--learn-chunk` is refused unless the gate is on, because a denser live stream

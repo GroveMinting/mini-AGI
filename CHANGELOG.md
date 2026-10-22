@@ -49,6 +49,15 @@ Fork-only additions. These are not upstream features.
   `bash`, and a retrying checkpoint replace for transient reader locks. The
   retry helper is integrated with the fork's manifest writer and keeps temp
   cleanup on failure.
+- Selective backport from upstream `aa9d53f`: the live learner restores the
+  run's base `lr` and `Plasticity` state, keeps fields it does not own when it
+  saves, and uses training's trunk/pool split. `serve.py` opens it through
+  `LiveLearner.for_run`; the effective rate is the base rate times the training
+  factor times the live gate scale.
+- Held-out evaluation now reads whole blocks spread over each subject, and the
+  sample log records the session's level plus the old top-of-file and
+  part-block readings so old entries can be moved onto it. Checks report at the
+  start level; the live gate scores the same spread blocks.
 
 ### Fixed
 
@@ -59,7 +68,7 @@ Fork-only additions. These are not upstream features.
   the revert limit is the smaller of `--gate-factor` and three standard
   errors. At four 512-character chunks the old 3-SE floor was ~11%, so a
   160-turn real-weight soak drifted from 0.8031 to 0.8903 without reverting.
-  Added a regression test; the suite is now 112 tests (3 CUDA-gated).
+  Added a regression test.
 - `serve.py` now rebinds `PoolKeeper` after a gate revert, before the next
   prune/grow decision. It previously kept pointing at the pre-revert pool and
   learner, so a later change could act on state that had just been restored.
@@ -75,13 +84,15 @@ Fork-only additions. These are not upstream features.
 
 - `serve.py` learns by default. With `data/val` present, the held-out gate is on
   by default; a live chunk below 2048 characters is refused unless the gate is
-  enabled.
+  enabled. `--learn-lr` now overrides the base rate only; the manifest's `lr`
+  and the training controller are used when it is omitted.
 - `README.md` documents the fork-only live, ingestion, self-model, scoped
   tool, retention, soak, and experimental serve-time growth paths;
   `HANDOFF.md` and `UPSTREAM.md` refreshed.
 - The fork is now maintained directly. Upstream has not been merging community
   PRs, so fixes and features land on `main`; upstream PR #34 was closed and
   upstream PR #32 is carried locally.
+- The suite is now **122 tests** (4 skipped on CPU; 3 CUDA-gated).
 
 ## [v0.1.2-mirror] — 2026-10-14
 
