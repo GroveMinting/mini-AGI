@@ -247,7 +247,10 @@ class LiveLearner:
         # itself; live saves used to drop the controller and the base rate
         keep = {k: v for k, v in self.manifest.items() if k not in self.OWN}
         keep.update({"read_chars": int(self.chars0 + self.chars),
-                     "read_nats": self.nats0 + self.nats})
+                     "read_nats": self.nats0 + self.nats,
+                     # an old checkpoint may predate lr in the manifest;
+                     # record the base this session actually used
+                     "lr": float(self.opt.param_groups[-1]["base_lr"])})
         if self.plast is not None:
             keep["plasticity"] = self.plast.state()
         keep.update(extra or {})

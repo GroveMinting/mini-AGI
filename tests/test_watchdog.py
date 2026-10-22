@@ -100,6 +100,28 @@ class WatchdogFlowTest(unittest.TestCase):
         wd._score = lambda: (scores.pop(0), ses.pop(0), {"chat": 0.5})
         return wd, weights, rebuilt
 
+    def test_restart_keeps_a_better_stored_baseline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            weights = os.path.join(tmp, "weights")
+            os.makedirs(weights)
+            best = os.path.join(tmp, "best")
+            first = HeldOutWatchdog(
+                _FakeModel(), _FakeLearner(weights), tmp, best_dir=best,
+                chunk=16, context=16, chunks=1, lr_control=False,
+                verbose=False)
+            first._score = lambda: (1.0, 0.0, {"chat": 1.0})
+            first.start()
+            second = HeldOutWatchdog(
+                _FakeModel(), _FakeLearner(weights), tmp, best_dir=best,
+                chunk=16, context=16, chunks=1, lr_control=False,
+                verbose=False)
+            second._score = lambda: (1.05, 0.0, {"chat": 1.05})
+            ev = second.start()
+            self.assertTrue(ev["kept_best"])
+            self.assertEqual(second.best, 1.0)
+            with open(os.path.join(best, "gate.json")) as f:
+                self.assertEqual(json.load(f)["val"], 1.0)
+
     def test_baseline_improve_and_revert(self):
         with tempfile.TemporaryDirectory() as tmp:
             wd, weights, rebuilt = self._setup(tmp, [1.0, 0.9, 1.2])

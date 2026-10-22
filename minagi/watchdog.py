@@ -148,6 +148,27 @@ class HeldOutWatchdog:
         mean = sum(vals.values()) / len(vals)
         return mean, se, vals
 
+    def _read_meta(self):
+        """The best this directory already holds, if it describes the same
+        instrument. A restart must not overwrite a better snapshot with its
+        own baseline."""
+        try:
+            with open(os.path.join(self.best_dir, "gate.json")) as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            return None
+        try:
+            same = (os.path.abspath(meta["held_out"]) == self.held_out
+                    and int(meta["chunk"]) == self.chunk
+                    and int(meta["context"]) == self.context
+                    and int(meta["chunks"]) == self.chunks
+                    and bool(meta.get("spread", False)) == self.spread)
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not same or meta.get("val") is None:
+            return None
+        return meta
+
     def _write_meta(self, path):
         meta = {"val": self.best, "se": self.best_se,
                 "held_out": self.held_out, "chunk": self.chunk,
@@ -198,21 +219,32 @@ class HeldOutWatchdog:
         if self.learner.unsaved:
             self.learner.save()
         val, se, doms = self._score()
-        self.best, self.best_se = val, se
-        self._snapshot()
+        stored = self._read_meta()
+        if stored is not None and float(stored["val"]) <= val:
+            # The snapshot is from an earlier session and is still better
+            # than the weights this session opened on. Keep it.
+            self.best = float(stored["val"])
+            self.best_se = float(stored.get("se") or 0.0)
+            kept = True
+        else:
+            self.best, self.best_se = val, se
+            self._snapshot()
+            kept = False
         if self.plasticity is not None:
             self.plasticity.step = int(self.learner.steps)
             self.plasticity.observe(val, se=se)
             self._apply_lr()
         ev = {"action": "baseline", "at": time.time(), "val": val,
-              "se": se, "best": val, "domains": doms,
-              "lr_scale": self.learner.scale,
+              "se": se, "best": self.best, "domains": doms,
+              "lr_scale": self.learner.scale, "kept_best": kept,
               "best_dir": self.best_dir}
         self.last, self.last_step = ev, int(self.learner.steps)
         self.events.append(ev)
         self._record(ev)
         self._say(f"baseline {val:.4f} over {len(doms)} domains; "
-                  f"best snapshot in {self.best_dir}")
+                  f"best {self.best:.4f}"
+                  + (" (kept the earlier snapshot)" if kept
+                     else f"; best snapshot in {self.best_dir}"))
         return ev
 
     def maybe_check(self, every=32):

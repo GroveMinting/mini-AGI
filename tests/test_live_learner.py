@@ -113,6 +113,19 @@ class LiveLearnerTest(unittest.TestCase):
             self.assertAlmostEqual(learner.factor(), 0.5)
             self.assertAlmostEqual(learner.effective_scale(), 0.25)
 
+    def test_save_records_base_rate_when_manifest_lacks_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, model, man = _tiny(tmp)
+            man.pop("lr", None)
+            learner = LiveLearner(model, chunk=16, context=32,
+                                  weights_dir=path, manifest=man,
+                                  save_every=0)
+            learner.feed("x" * 16, ByteTokenizer())
+            self.assertTrue(learner.save())
+            with open(os.path.join(path, "manifest.json")) as f:
+                saved = json.load(f)
+            self.assertAlmostEqual(saved["lr"], 3e-4)
+
     def test_save_preserves_rate_and_controller(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, model, man = _tiny(tmp)
