@@ -11,6 +11,13 @@ Fork-only additions. These are not upstream features.
 
 ### Added
 
+- `minagi/writer_lock.py` — one writer per weights directory. Live serving,
+  `train.py read --save`, and ingestion hold an advisory lock; read-only
+  serving does not. The lock lives beside the directory so snapshots stay
+  clean.
+- Held-out retention rows record their instrument (directory, chunk, context,
+  chunks, spread, domains); summaries and plots start a fresh baseline when
+  the instrument changes, rather than comparing unlike scores.
 - `replication/live_probe.py` + `make live-probe` — measure the held-out cost of
   the live conversation stream without writing the source weights.
 - `minagi/watchdog.py` — held-out gate for serving: keep the best state, revert

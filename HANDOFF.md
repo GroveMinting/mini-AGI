@@ -42,6 +42,13 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   working tree on top of `9a02281`, not yet committed.
 - Documentation rule: reconcile `HANDOFF.md`, `DEVPLAN.local.md`, `UPSTREAM.md`,
   and `CHANGELOG.md` at the end of every iteration, before the next one starts.
+- Single-writer enforcement (2026-10-22): `minagi/writer_lock.py` locks a
+  weights directory beside the model; `serve.py` learning, `train.py read
+  --save`, and `ingestd` hold it; read-only serving does not. Dragon refused a
+  second writer with pid/host/purpose in the message.
+- Retention rows now record the held-out instrument (directory, chunk, context,
+  chunks, spread, domains); `summary()` uses the latest instrument segment, so
+  a migration starts a fresh baseline instead of subtracting unlike scores.
 - Live-step restart verified on Dragon (2026-10-22): one session step saved
   `live_steps=1` with base step `223506`; restarting reported
   `model_step=223507`, so the counter continues without double-counting.
@@ -110,8 +117,9 @@ Ordered by risk to the next iteration:
 
 - **P1 upstream decision.** Compare the remaining `aa9d53f` API port against
   the value of lane scheduling, paged newborn rates, and performance changes.
-- **P1 operational hardening.** Add single-writer enforcement, define
-  retention migration/marking, and close the P0 restart accounting findings.
+- **P1 operational hardening.** Done 2026-10-22: writers take an advisory
+  per-directory lock; retention rows carry their held-out instrument and start
+  a new baseline when it changes; the P0 restart accounting is verified.
 - **Orin disposition: short checks only.** Do not target Orin for long or
   unattended gate/replay soaks; use Dragon.
 - **Upstream decision: stay selective.** No full `aa9d53f` sync now. The
@@ -121,8 +129,8 @@ Ordered by risk to the next iteration:
   normal LR (174 -> 179, no prune). Still run a full default-survival
   growth/prune sequence before deciding whether serve-time growth stays
   experimental.
-- **Operational hardening.** Address single-writer enforcement and retention
-  baseline migration. The `live_steps` restart path is verified.
+- **Operational hardening.** The `live_steps` restart path, single-writer
+  enforcement, and retention instrument migration are done.
 - **Scope decision.** Decide whether “improve the codebase itself” is a real
   autonomous goal or an operator-assisted maintenance workflow.
 
