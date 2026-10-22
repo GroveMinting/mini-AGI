@@ -1,11 +1,13 @@
 """The live stream's mechanics: steps, window, save cadence, LR scale."""
 
+import json
 import os
 import tempfile
 import unittest
 
 from minagi.create import create
 from minagi.live import LiveLearner
+from minagi.pool import PooledMLP, split_trunk_pool
 from minagi.tokenizer import ByteTokenizer
 import train as T
 
@@ -24,6 +26,19 @@ def _tiny(root):
 
 
 class LiveLearnerTest(unittest.TestCase):
+    def test_split_trunk_pool_keeps_routing_in_the_pool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _path, model, _man = _tiny(tmp)
+            trunk, pool = split_trunk_pool(model)
+            trunk_ids = {id(q) for q in trunk}
+            pool_ids = {id(q) for q in pool}
+            self.assertFalse(trunk_ids & pool_ids)
+            self.assertIn(id(model.pool.gate), pool_ids)
+            for site in model.modules():
+                if isinstance(site, PooledMLP):
+                    self.assertIn(id(site.router.weight), pool_ids)
+                    self.assertIn(id(site.depth_emb), pool_ids)
+
     def test_short_message_takes_no_step(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, model, man = _tiny(tmp)
@@ -78,6 +93,44 @@ class LiveLearnerTest(unittest.TestCase):
             learner.reset_stream()
             self.assertEqual(learner.buf, [])
             self.assertEqual(learner.pending, 0)
+
+    def test_for_run_uses_training_rate_and_live_scale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, model, man = _tiny(tmp)
+            man.update({"lr": 0.001,
+                        "plasticity": {"scale": 0.5, "step": 100}})
+            learner = LiveLearner.for_run(
+                model, weights_dir=path, manifest=man, chunk=16, context=32,
+                save_every=0, config={})
+            self.assertAlmostEqual(learner.factor(), 0.5)
+            self.assertAlmostEqual(
+                learner.opt.param_groups[-1]["base_lr"], 0.001)
+            self.assertAlmostEqual(
+                learner.opt.param_groups[-1]["lr"], 0.0005)
+            learner.set_scale(0.5)
+            self.assertAlmostEqual(
+                learner.opt.param_groups[-1]["lr"], 0.00025)
+            self.assertAlmostEqual(learner.factor(), 0.5)
+            self.assertAlmostEqual(learner.effective_scale(), 0.25)
+
+    def test_save_preserves_rate_and_controller(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, model, man = _tiny(tmp)
+            man.update({"lr": 0.001,
+                        "plasticity": {"scale": 0.5, "step": 100},
+                        "read_chars": 100})
+            learner = LiveLearner.for_run(
+                model, weights_dir=path, manifest=man, chunk=16, context=32,
+                save_every=0, config={})
+            learner.feed("x" * 16, ByteTokenizer())
+            self.assertTrue(learner.save())
+            with open(os.path.join(path, "manifest.json")) as f:
+                saved = json.load(f)
+            self.assertAlmostEqual(saved["lr"], 0.001)
+            self.assertAlmostEqual(saved["plasticity"]["scale"], 0.5)
+            self.assertGreater(saved["plasticity"]["step"], 100)
+            self.assertGreater(saved["read_chars"], 100)
+            self.assertEqual(saved["step"], man.get("step"))
 
 
 if __name__ == "__main__":

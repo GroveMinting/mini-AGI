@@ -56,11 +56,12 @@ import torch
 import torch.nn as nn
 
 from minagi.recur import RecurConfig, RecurCoder, load_recur
-from minagi.pool import PooledMLP, AutoGrow
+from minagi.pool import PooledMLP, AutoGrow, split_trunk_pool
 from minagi.stream import StreamSet, Evaluator, detach_caches, ramp_context
 from minagi.plasticity import Plasticity
 from minagi.optim import GradSNR
 from minagi import store as weights_store
+from minagi import heldout
 
 
 def lr_at(step, total, base, warmup, floor_frac=0.1):
@@ -337,7 +338,8 @@ def cmd_stream(args):
             if val < best:
                 best = val
                 weights_store.save(model, wdir, step=step, val=val, opt=opt,
-                                   cfg=asdict(cfg), verbose=True)
+                                   cfg=asdict(cfg), verbose=True,
+                                   extra={"lr": args.lr})
                 record("saved", step=step, val=val)
                 print(f"  improved - weights/ advanced to val {val:.4f}",
                       flush=True)
@@ -825,10 +827,53 @@ def _cmd_read(args, dry_shadow=None):
     ev = (FolderEvaluator(model, args.held_out, args.chunk, cfg.block, device)
           if args.held_out and os.path.isdir(args.held_out) else None)
     before = None
+    # THE LEVEL CHECKS REPORT AT. Every evaluation here reads whole blocks
+    # spread over all of each subject. A check reads a few, and a few blocks
+    # sit a little above or below the whole set by an amount that stays put
+    # while they do - so the start reads the larger evaluation and the
+    # checks' own blocks side by side, and every check this session reports
+    # what it reads plus the difference between the two (minagi/heldout.py).
+    # The check as it was read before checks were spread, from the top of
+    # each subject, is read as well, so the log says how far those sat from
+    # this level.
+    level, held, parts = {}, None, None
     if ev is not None:
-        v = ev.run(eval_steps); se = v.pop("stderr", 0.0)
+        v = ev.run(eval_steps, spread=True); se = v.pop("stderr", 0.0)
         before = float(np.mean(list(v.values())))
-        print(f"  before: {before:.4f} +/-{se:.4f} on {args.held_out}")
+        c = ev.run(sample_eval_steps, spread=True); c.pop("stderr", None)
+        top = ev.run(sample_eval_steps); top.pop("stderr", None)
+        level = {k: v[k] - c[k] for k in v if k in c}
+        # The first session to count whole blocks only reads the old blocks
+        # too, once, so the log can move everything before it onto the new
+        # level (minagi/heldout.py, part_shift).
+        try:
+            with open(args.sample_log, errors="ignore") as f:
+                counted = heldout.part_shift(f.read()) is not None
+        except (OSError, TypeError):
+            counted = True               # no log: nothing before to move
+        if not counted and args.sample_every:
+            old = FolderEvaluator(model, args.held_out, args.chunk, cfg.block,
+                                  device, whole=False)
+            parts = old.run(eval_steps, spread=True)
+            parts.pop("stderr", None)
+            print(f"  held-out now counts whole blocks only: {before:.4f}; "
+                  f"with each file's leftover part-block, as before, "
+                  f"{np.mean(list(parts.values())):.4f} - the log draws "
+                  f"earlier checks moved by the difference, subject by "
+                  f"subject")
+            # the best this run has seen was read on the old blocks too
+            best_val -= float(np.mean(list(parts.values()))) - before
+        held = (dict(v), c, top, parts)
+        print(f"  before: {before:.4f} +/-{se:.4f} on {args.held_out}, "
+              f"{-(-eval_steps // ev.per)} blocks of each subject spread "
+              f"over all of it")
+        print(f"  checks read {-(-sample_eval_steps // ev.per)} blocks of "
+              f"each: {np.mean(list(c.values())):.4f} here, so they report "
+              f"{before - np.mean(list(c.values())):+.4f} from what they "
+              f"read; from the top of each subject, as checks read before, "
+              f"{np.mean(list(top.values())):.4f}")
+        # the best this run has seen includes what it has just measured
+        best_val = min(best_val, before)
 
     pool.attach_optimiser(opt)
     # ADAM'S MOMENTS. They are written to optim.npz at every checkpoint and
@@ -912,6 +957,10 @@ def _cmd_read(args, dry_shadow=None):
                     f"{info['characters']/1e6:,.0f}M characters read "
                     f"({100.0 * base_chars / max(info['characters'], 1):.2f}%), "
                     f"{pool.n_experts()} experts\n")
+            if held is not None:
+                # what the start measured, and so the level of every check
+                # below it - read back by the plots and the README
+                f.write(heldout.banner(*held))
             f.write(f"{'#' * 78}\n")
 
     # The window starts where the model left it, not at the ceiling. RoPE
@@ -1055,6 +1104,7 @@ def _cmd_read(args, dry_shadow=None):
                            extra={"read_chars": base_chars + seen,
                                   "read_nats": nats,
                                   "plasticity": plast.state(),
+                                  "lr": args.lr,
                                   "context_now": ctx_now})
         log_history(val)
 
@@ -1198,11 +1248,12 @@ def _cmd_read(args, dry_shadow=None):
                 # every step so the gradient can reach all of it, and keeps no
                 # cache between steps. Detaching is what used to cut the
                 # gradient at the chunk boundary.
-                fl.append(float(loss))
-                recent.append(float(loss))
-                by_pos[j].append(float(loss))
+                loss_value = float(loss.detach())
+                fl.append(loss_value)
+                recent.append(loss_value)
+                by_pos[j].append(loss_value)
                 seen += args.chunk
-                nats += float(loss) * args.chunk
+                nats += loss_value * args.chunk
                 step += 1
                 pool.now = step          # the clock the expert trial reads
                 plast.tick()
@@ -1218,8 +1269,10 @@ def _cmd_read(args, dry_shadow=None):
                     v_ = se_ = None
                     dom = None
                     if ev is not None:
-                        d = ev.run(sample_eval_steps)
+                        d = ev.run(sample_eval_steps, spread=True)
                         se_ = d.pop("stderr", None)
+                        # at the level the start measured - see `level`
+                        d = {k: x + level.get(k, 0.0) for k, x in d.items()}
                         v_ = float(np.mean(list(d.values())))
                         # The generalisation gap, kept for the growth
                         # decision. It is the thing the density ceiling was
@@ -1250,7 +1303,10 @@ def _cmd_read(args, dry_shadow=None):
                                   context_gain(), read_rate,
                                   float(np.mean(grads)) if grads else None,
                                   args.clip, plast.state(),
-                                  write_rate=write_rate)
+                                  write_rate=write_rate,
+                                  level=(float(np.mean(list(level.values())))
+                                         if level and v_ is not None
+                                         else None))
                     rp = pool.report()
                     print(f"    samples -> {args.sample_log}"
                           + (f"  train {float(np.mean(recent)):.4f}"
@@ -1405,7 +1461,7 @@ def _cmd_read(args, dry_shadow=None):
         print(f"  mean loss over the files: {np.mean(losses):.4f}")
 
     if ev is not None:
-        v = ev.run(eval_steps); se = v.pop("stderr", 0.0)
+        v = ev.run(eval_steps, spread=True); se = v.pop("stderr", 0.0)
         after = float(np.mean(list(v.values())))
         d = after - before
         print(f"  after:  {after:.4f} +/-{se:.4f}   {d:+.4f}")
@@ -1443,6 +1499,7 @@ def _cmd_read(args, dry_shadow=None):
                            extra={"read_chars": base_chars + seen,
                                   "read_nats": nats,
                                   "plasticity": plast.state(),
+                                  "lr": args.lr,
                                   "context_now": ctx_now})
         print(f"  weights/ updated - the model has read this and kept it")
     else:
@@ -1860,30 +1917,9 @@ def write_samples(path, step, chars, minutes, samples, val=None, se=None,
     return path
 
 def _split_trunk_pool(model):
-    """
-    Which parameters are the pool's, and which are the shared body.
-
-    A resident pool keeps its experts as modules; a paged pool keeps three
-    stacked slot tensors instead, so the set has to be found by asking the
-    pool rather than by walking a ModuleList that is not there.
-    """
-    p = model.pool
-    ids = {id(p.gate)}
-    if hasattr(p, "experts") and p.experts is not None:
-        ids |= {id(q) for e in p.experts for q in e.parameters()}
-    for nm in ("w1", "w3", "w2"):
-        obj = getattr(p, nm, None)
-        if obj is None:
-            continue
-        ids |= ({id(obj)} if torch.is_tensor(obj)
-                else {id(q) for q in obj.parameters()})
-    for s in model.modules():
-        if isinstance(s, PooledMLP):
-            ids.add(id(s.router.weight))
-            ids.add(id(s.depth_emb))
-    trunk = [q for q in model.parameters() if id(q) not in ids]
-    pool = [q for q in model.parameters() if id(q) in ids]
-    return trunk, pool
+    """Which parameters are the pool's, and which are the shared body -
+    minagi/pool.py, where every learner finds the same split."""
+    return split_trunk_pool(model)
 
 
 def build_paged(wdir, device, resident=None, ram_capacity=256, ceiling=None,

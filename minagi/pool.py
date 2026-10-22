@@ -696,6 +696,39 @@ class PooledMLP(nn.Module):
         return out.view(B, T, D)
 
 
+def split_trunk_pool(model):
+    """
+    Which parameters are the pool's, and which are the shared body - the split
+    every learner steps by, so a stream that carries training on (chat, a test
+    read while learning - minagi/live.py) gives each parameter the rate
+    training gives it. The pool's are its experts, its gate, and every routing
+    site's router rows and depth embedding: a newborn expert's gate and router
+    rows move at its own rate, so they belong with its weights. Split by name
+    instead, the router rows land in the trunk and learn at its tenth.
+
+    A resident pool keeps its experts as modules; a paged pool keeps three
+    stacked slot tensors instead, so the set has to be found by asking the pool
+    rather than by walking a ModuleList that is not there.
+    """
+    p = model.pool
+    ids = {id(p.gate)}
+    if hasattr(p, "experts") and p.experts is not None:
+        ids |= {id(q) for e in p.experts for q in e.parameters()}
+    for nm in ("w1", "w3", "w2"):
+        obj = getattr(p, nm, None)
+        if obj is None:
+            continue
+        ids |= ({id(obj)} if torch.is_tensor(obj)
+                else {id(q) for q in obj.parameters()})
+    for s in model.modules():
+        if isinstance(s, PooledMLP):
+            ids.add(id(s.router.weight))
+            ids.add(id(s.depth_emb))
+    trunk = [q for q in model.parameters() if id(q) not in ids]
+    pool = [q for q in model.parameters() if id(q) in ids]
+    return trunk, pool
+
+
 def _mem_frac():
     """
     Peak fraction of the GPU this process actually needs. 0.0 without a GPU.

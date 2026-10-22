@@ -20,9 +20,9 @@ step cadence, and:
     on a revert.
 
 The held-out score is the unweighted mean over its sub-folders, matching the
-probe's `others` aggregate. The evaluator reads every file from position zero,
-so improvement means the weights changed, not that a different sample was
-drawn.
+probe's `others` aggregate. By default it reads whole blocks spread over all of
+each subject - the same kind of sample training scores - so a reading means the
+weights changed, not that a different part of the file was reached.
 
 REVERTING A PAGED MODEL. The pool pages experts from the weights directory,
 so restoring the directory and then re-loading the model is the reliable path.
@@ -89,7 +89,7 @@ class HeldOutWatchdog:
     def __init__(self, model, learner, held_out, best_dir=None, chunk=2048,
                  context=None, chunks=4, factor=1.10, device=None,
                  lr_control=True, rebuild=None, retention_log=None,
-                 verbose=True):
+                 verbose=True, spread=True):
         if not learner.weights_dir:
             raise ValueError("the watchdog needs a live weights directory")
         self.model = model
@@ -104,6 +104,7 @@ class HeldOutWatchdog:
         self.context = int(context or getattr(model.cfg, "block", 4096))
         self.chunk = max(8, min(int(chunk), self.context))
         self.chunks = max(1, int(chunks))
+        self.spread = bool(spread)
         self.factor = float(factor)
         self.rebuild = rebuild
         self.verbose = verbose
@@ -135,7 +136,7 @@ class HeldOutWatchdog:
                 self.device)
         was_training = self.model.training
         try:
-            d = self.ev.run(self.chunks)
+            d = self.ev.run(self.chunks, spread=self.spread)
         finally:
             # FolderEvaluator leaves the model in train mode; generation must
             # not inherit dropout from a background check.
@@ -151,7 +152,7 @@ class HeldOutWatchdog:
         meta = {"val": self.best, "se": self.best_se,
                 "held_out": self.held_out, "chunk": self.chunk,
                 "context": self.context, "chunks": self.chunks,
-                "at": time.time()}
+                "spread": self.spread, "at": time.time()}
         tmp = os.path.join(path, "gate.json.tmp")
         with open(tmp, "w") as f:
             json.dump(meta, f, indent=1)

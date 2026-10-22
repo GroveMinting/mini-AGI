@@ -337,13 +337,50 @@ class FolderEvaluator:
     The same thing Evaluator does, for text on disk rather than a packed .bin.
     Each sub-folder is scored separately, so a mixture still reports per
     domain, and the files are read in order the way `read` reads them.
+
+    A FILE IS SCORED AS INDEPENDENT BLOCKS. Measuring clears the attention
+    cache whenever the next chunk would take it past `context` characters,
+    and a forward from position 0 starts its text's expert vote afresh, so a
+    file is scored as blocks of `self.block` characters from its first, and
+    what a block scores depends on its own characters and nothing read before
+    them. Reading one block alone gives exactly what reading the file from
+    the top gives for that block - which is what lets an evaluation choose
+    WHICH blocks it reads.
+
+    WHICH BLOCKS. `run` reads each subject's files from the top until it has
+    its chunks: the first documents and nothing else. With spread=True it
+    reads the same number of chunks as whole blocks spread evenly over
+    everything the subject holds - block j of n is the one (j + 0.5) / n of
+    the way through the subject's blocks, file after file - and the same
+    blocks every time, so two evaluations differ only by the model. On this
+    run's held-out, reading from the top meant the opening of one 2.9 MB
+    wikipedia file and about one reasoning trace of 400, and the first 30,720
+    characters of a subject and the next 92,160 differed by 0.12 in one
+    subject and by 0.10 the other way in another.
+
+    WHOLE BLOCKS ONLY. A file seldom ends on a block boundary, and what is
+    left after its last whole block used to be a block of its own - however
+    short. A chunk's loss is a mean over its characters and a subject's is a
+    mean over its chunks, so a 68-character leftover counted as much as 2,048
+    characters, all of them predicted from almost no context. Three short
+    chunks (73, 68 and 32 characters) were 21% of chat_hermes's check, which
+    read ~1.0 nats against 0.74 for the subject, with a noise of 0.025 a check
+    against 0.002 before. With every block whole, every chunk is the same
+    length. `whole=False` keeps the old blocks, for measuring what that
+    change moved; a subject with no whole block at all keeps its pieces.
     """
 
-    def __init__(self, model, root, chunk, context, device, per_domain=True):
+    def __init__(self, model, root, chunk, context, device, per_domain=True,
+                 whole=True):
         from minagi.ingest import collect, as_stream
         self._as_stream = as_stream
         self.model, self.chunk, self.context = model, chunk, context
         self.device = device
+        self.per = max(1, context // chunk)       # chunks between cache clears
+        self.block = chunk * self.per
+        self.whole = whole
+        self._blocks = {}            # subject -> every (file, start), on demand
+        self._picked = {}            # (subject, n) -> the blocks' characters
         self.groups = {}
         subs = [d for d in sorted(os.listdir(root))
                 if os.path.isdir(os.path.join(root, d))] if per_domain else []
@@ -353,11 +390,82 @@ class FolderEvaluator:
         else:
             self.groups["all"] = collect([root])
 
+    def blocks(self, name):
+        """Every whole block of one subject in reading order, as (file,
+        start): the blocks reading it from the top would score, from the same
+        files, leaving out what is left of each file after its last whole
+        block (see WHOLE BLOCKS ONLY)."""
+        if name not in self._blocks:
+            out, whole = [], []
+            for f in self.groups[name]:
+                n = len(self._as_stream(f))
+                if n < 8:                # reading from the top skips these too
+                    continue
+                # a block needs a first chunk of two characters to score
+                out.extend((f, s) for s in range(0, n - 2, self.block))
+                # a whole block is `per` full chunks: its characters and
+                # one past them, the target of its last
+                whole.extend((f, s) for s in range(0, n - self.block,
+                                                   self.block))
+            self._blocks[name] = whole if (self.whole and whole) else out
+        return self._blocks[name]
+
+    def spread(self, name, n):
+        """n of a subject's blocks spread evenly over all of them; every block
+        when there are no more than n."""
+        every = self.blocks(name)
+        if n >= len(every):
+            return list(every)
+        return [every[int((j + 0.5) * len(every) / n)] for j in range(n)]
+
+    def _texts(self, name, n):
+        """The characters of the spread blocks, read from disk once and kept,
+        so the text every evaluation scores is the text the first one did."""
+        key = (name, n)
+        if key not in self._picked:
+            texts, data, at = [], None, None
+            for f, s in self.spread(name, n):
+                if f != at:
+                    data, at = self._as_stream(f), f
+                # one character past the block: the target of its last one
+                texts.append(data[s:s + self.block + 1].copy())
+            self._picked[key] = texts
+        return self._picked[key]
+
+    def score_block(self, data, name):
+        """The chunk losses of one block, read alone."""
+        r = FileReader(self.model, data, name, self.chunk, self.context,
+                       self.device)
+        out = []
+        while len(out) < self.per and not r.done():
+            l = r.step(learn=False)
+            if l is None:
+                break
+            out.append(float(l))
+        return out
+
     @torch.no_grad()
-    def run(self, chunks=240):
+    def run(self, chunks=240, spread=False):
         self.model.eval()
         out, every = {}, []
-        per = max(1, self.context // self.chunk)
+        per = self.per
+        if spread:
+            means = []
+            n = max(1, -(-int(chunks) // per))    # whole blocks, rounding up
+            for name in self.groups:
+                losses = []
+                for data in self._texts(name, n):
+                    got = self.score_block(data, name)
+                    losses.extend(got)
+                    if got:
+                        means.append(float(np.mean(got)))
+                if losses:
+                    out[name] = float(np.mean(losses))
+            # block means, as below, where a window of `per` chunks is a block
+            out["stderr"] = (float(np.std(means, ddof=1) / np.sqrt(len(means)))
+                             if len(means) >= 2 else 0.0)
+            self.model.train()
+            return out
         for name, files in self.groups.items():
             losses = []
             fi = 0
