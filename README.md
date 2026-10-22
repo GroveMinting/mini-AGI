@@ -380,8 +380,10 @@ section are additions in this fork, not upstream features.
 `--no-learn` opens the weights read-only. If `data/val` exists, the held-out
 watchdog is on by default: it keeps a `<weights>.best` snapshot, scores held-out
 every 32 live steps, and restores the snapshot (halving the learning rate) when
-held-out is worse than the best by `--gate-factor` (default 1.10x), with a
-three-standard-error noise floor. `--held-out` chooses another directory;
+held-out is worse than the best by `--gate-factor` (default 1.10x) or by
+three evaluation standard errors, whichever is smaller. The factor is a hard
+material cap; the standard-error term can only tighten it, so a noisy
+evaluation cannot widen the guard. `--held-out` chooses another directory;
 `--no-gate` removes the guard.
 
 The default live step is `training.chunk` (2048 characters). A lower
@@ -401,6 +403,25 @@ python3 serve.py --port 8080 \
 default and should be treated as private. `--replay-every` needs the gate: one
 recent exchange is fed back every N turns, optionally interleaved with a
 `--replay-corpus` folder, through the same learner and gate.
+
+Serve-time growth is opt-in and still experimental. It needs the held-out gate
+and a disk ceiling; the checkpoint's original experts are protected from
+pruning, while experts grown during the session can be pruned after
+`--grow-min-age` steps if nothing asks for them:
+
+```bash
+python3 serve.py --port 8080 --held-out data/val \
+    --grow-every 1 --grow-max-experts 190 --grow-max-gb 6
+```
+
+`--grow-every` is in held-out checks, `--grow-k` experts are added per
+decision, and `--no-prune` grows without deleting. The defaults
+(`--grow-min-age 3000`) are deliberately conservative; values near 4 are for
+soak tests, not ordinary serving. Growth does not prevent the held-out cost of
+a long live stream - in a 160-turn normal-rate run the gate reverted after five
+prune/grow cycles - but it is reverted with everything else. A 140-turn
+low-rate run held 175 experts with seven consecutive `pruned: 1, grew: 1`
+cycles and no regression.
 
 To measure the live stream without changing your weights:
 

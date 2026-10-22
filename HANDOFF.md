@@ -22,8 +22,8 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 - Latest release tag: `v0.1.2-mirror`. `main` also carries the unreleased,
   fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
   soak additions documented in [README.md](README.md).
-- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **101 tests**
-  (98 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
+- Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **102 tests**
+  (99 CPU + 3 CUDA-gated). `make test` is green on CPU (`make test-gpu` also runs
   the CUDA tests on a card); `make smoke` runs the end-to-end path.
 - Verified on an RTX 5080 Laptop (Blackwell, `sm_120`): `tools/device_check.py`,
   `make smoke`, and the CUDA test tier all pass. The fork-only live,
@@ -91,7 +91,7 @@ test tier (`tests/test_gpu_paging.py`); the `gcnArchName`-on-CUDA fix in
 `tools/device_check.py`; the fork-only live-serving path (probe, held-out gate,
 experience/replay), the ingestion daemon, the self-knowledge rebuild tool, the
 scoped tool registry and receipt ledger, the retention log/dashboard, the
-fault-injection soak, and its 101-test suite; and this documentation pass.
+fault-injection soak, and its 102-test suite; and this documentation pass.
 
 ## Risks / open questions
 

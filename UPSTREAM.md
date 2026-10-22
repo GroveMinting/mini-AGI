@@ -66,6 +66,19 @@ readiness, is:
    naming a deleted file. This is a small correctness fix with
    `tests/test_soak.py`; it is the strongest candidate for a separate upstream
    PR. It currently lives on `main`, not on `hardening`.
+
+   **Prepared handoff:** commit `858093c` is the candidate. The full diff
+   (store + soak + test) applies cleanly to `ce31731` and the current mirror
+   `95e901e`, and its three `test_soak.py` cases pass on both. No generated
+   patch is tracked. No external PR has been opened. Produce the full or
+   store-only diff with:
+
+   ```sh
+   mkdir -p runs/upstream-handoff
+   git diff 858093c^ 858093c > runs/upstream-handoff/prune-order-full.patch
+   git diff 858093c^ 858093c -- minagi/store.py \
+       > runs/upstream-handoff/prune-order-minimal.patch
+   ```
 2. **Retention log and dashboard (M7).** Analysis-only: per-domain held-out
    readings in JSONL and a plot. Low risk, but it introduces a log format and a
    default write path, so it needs a maintainer decision.
@@ -76,7 +89,7 @@ readiness, is:
    Behavior-changing or corpus-policy changes; each needs its own long-run
    evidence and should not ride on the correctness series.
 
-Local acceptance for the fork-only set is the 101-test CPU/CUDA suite plus
+Local acceptance for the fork-only set is the 102-test CPU/CUDA suite plus
 `scripts/soak.py` and the retention dashboard. None of it is a substitute for
 upstream review.
 

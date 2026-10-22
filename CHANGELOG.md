@@ -44,14 +44,21 @@ Fork-only additions. These are not upstream features.
 - `scripts/soak.py` + `make soak` — fault injection for a crash mid-bundle,
   a crash before the manifest, disk full, prune ordering, and retry/resume.
 - Tests for interrupted saves, disk-full retry, prune ordering, the retention
-  log and summary, and watchdog recording; the suite is now 101 tests
-  (3 CUDA-gated).
+  log and summary, and watchdog recording.
 
 ### Fixed
 
 - `PoolKeeper` now protects the checkpoint's original experts from serve-time
   pruning; a short survival window could previously delete them. Added a test
   that prunes a stale grown expert while keeping the checkpoint.
+- The held-out gate no longer lets a noisy evaluation widen its material cap:
+  the revert limit is the smaller of `--gate-factor` and three standard
+  errors. At four 512-character chunks the old 3-SE floor was ~11%, so a
+  160-turn real-weight soak drifted from 0.8031 to 0.8903 without reverting.
+  Added a regression test; the suite is now 102 tests (3 CUDA-gated).
+- `serve.py` now rebinds `PoolKeeper` after a gate revert, before the next
+  prune/grow decision. It previously kept pointing at the pre-revert pool and
+  learner, so a later change could act on state that had just been restored.
 - The self-knowledge YAML's rebuild-tool reference now resolves.
 - Pruned expert files are deleted only after the new manifest is durable. An
   interrupted prune can no longer leave the old manifest naming a removed
@@ -63,7 +70,8 @@ Fork-only additions. These are not upstream features.
   by default; a live chunk below 2048 characters is refused unless the gate is
   enabled.
 - `README.md` documents the fork-only live, ingestion, self-model, scoped
-  tool, retention, and soak paths; `HANDOFF.md` and `UPSTREAM.md` refreshed.
+  tool, retention, soak, and experimental serve-time growth paths;
+  `HANDOFF.md` and `UPSTREAM.md` refreshed.
 
 ## [v0.1.2-mirror] — 2026-10-14
 
