@@ -1408,7 +1408,7 @@ def _cmd_read(args, dry_shadow=None):
                               f"separated by {last_gap:.3f}, over "
                               f"{args.max_gap:.2f} - that is memorising, and "
                               f"more capacity would make it worse", flush=True)
-                    rec = (grower.step(float(loss), pool, step)
+                    rec = (grower.step(float(loss.detach()), pool, step)
                            if (args.save and may_grow) else {"grew": 0})
                     if gone or rec["grew"]:
                         _resync_opt(opt, model, args)
