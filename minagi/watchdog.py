@@ -13,8 +13,9 @@ step cadence, and:
   * snapshots the weights when held-out improves (hardlinks, so it is cheap
     and does not double the disk);
   * restores that snapshot when held-out is worse than the best by `factor`
-    or by three evaluation standard errors, whichever is larger - the noise
-    floor is what keeps a single reading from reverting a good state;
+    or by three evaluation standard errors, whichever is smaller - the factor
+    is a hard material cap, while the standard error can only tighten it when
+    the evaluation is precise enough;
   * moves the learning rate with `Plasticity` when it is given, and halves it
     on a revert.
 
@@ -231,7 +232,11 @@ class HeldOutWatchdog:
             note = self.plasticity.observe(val, se=se)
         else:
             note = None
-        limit = max(self.best * self.factor,
+        # The factor is the material cap. A noisy instrument must not widen
+        # it: at four 512-character chunks the standard error is ~0.037, so
+        # three of them (~0.11) would otherwise let an 11% drift look "ok".
+        # A precise reading still tightens the limit; the smaller wins.
+        limit = min(self.best * self.factor,
                     self.best + 3.0 * max(se, self.best_se, 1e-9))
         ev = {"action": "ok", "at": time.time(), "val": val, "se": se,
               "best": self.best, "limit": limit, "domains": doms,

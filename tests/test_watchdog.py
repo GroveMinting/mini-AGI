@@ -79,7 +79,7 @@ class WatchdogFlowTest(unittest.TestCase):
             self.assertEqual(wd.last_step, 7)
             self.assertIsNone(wd.ev)
 
-    def _setup(self, tmp, scores, lr_control=False):
+    def _setup(self, tmp, scores, ses=None, lr_control=False):
         weights = os.path.join(tmp, "weights")
         os.makedirs(weights)
         with open(os.path.join(weights, "core.npz"), "w") as f:
@@ -96,7 +96,8 @@ class WatchdogFlowTest(unittest.TestCase):
             _FakeModel(), learner, tmp, best_dir=os.path.join(tmp, "best"),
             chunk=16, context=16, chunks=1, factor=1.05,
             lr_control=lr_control, rebuild=rebuild, verbose=False)
-        wd._score = lambda: (scores.pop(0), 0.0, {"chat": 0.5})
+        ses = list(ses or [0.02] * len(scores))
+        wd._score = lambda: (scores.pop(0), ses.pop(0), {"chat": 0.5})
         return wd, weights, rebuilt
 
     def test_baseline_improve_and_revert(self):
@@ -143,6 +144,16 @@ class WatchdogFlowTest(unittest.TestCase):
             self.assertEqual(wd.check()["action"], "ok")
             self.assertEqual(rebuilt, [])
             self.assertEqual(wd.best, 1.0)
+
+    def test_noise_floor_cannot_widen_the_material_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # 3 * se would allow a 12% regression, but the 5% factor is the
+            # material cap. A noisy instrument must not turn 8% into "ok".
+            wd, _weights, rebuilt = self._setup(
+                tmp, [1.0, 1.08], ses=[0.04, 0.04])
+            wd.start()
+            self.assertEqual(wd.check()["action"], "reverted")
+            self.assertEqual(rebuilt, [wd.weights_dir])
 
     def test_plasticity_scale_halves_on_revert(self):
         with tempfile.TemporaryDirectory() as tmp:

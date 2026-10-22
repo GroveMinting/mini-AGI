@@ -87,7 +87,7 @@ class WatchdogRetentionTest(unittest.TestCase):
                 chunks=1, factor=1.05, lr_control=False,
                 retention_log=log, verbose=False)
             scores = [1.0, 0.9, 0.91]
-            wd._score = lambda: (scores.pop(0), 0.0,
+            wd._score = lambda: (scores.pop(0), 0.02,
                                  {"chat": 0.5, "code": 0.6})
             wd.start()
             learner.steps = 7
