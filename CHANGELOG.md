@@ -7,7 +7,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Fork-only additions. These are not upstream features.
+## [v0.2.0-mirror] — 2026-10-22
+
+Selective `aa9d53f` backport plus fork-only live-serving, ingestion,
+self-model, scoped-tool, retention, and soak work. Serve-time growth remains
+opt-in and experimental.
 
 ### Added
 

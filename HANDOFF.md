@@ -19,14 +19,16 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
-  branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`, whose
-  `serve.py`/`LiveLearner` API changes still need a real port.
-- `main` is at `324b807`, which carries upstream PR #32 (Windows runtime
-  fixes), the selective `aa9d53f` backport, and the fork-only live-serving,
-  ingestion, self-model, scoped-tool, retention, and soak additions documented
-  in [README.md](README.md). Recent closes: gate/lr persistence `e1816d0`,
-  live-step continuity `5051438`, growth detach `65c3197`, one-writer and
-  retention migration `1a84604`/`5216c33`.
+  branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`. A full
+  sync is not planned; its `serve.py`/`LiveLearner` API would need a real port
+  only if the selective decision changes.
+- `main` is at the `v0.2.0-mirror` release checkpoint. It carries upstream
+  PR #32 (Windows runtime fixes), the selective `aa9d53f` backport, and the
+  fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
+  soak additions documented in [README.md](README.md). Recent closes:
+  gate/lr persistence `e1816d0`, live-step continuity `5051438`, growth detach
+  `65c3197`, one-writer/retention migration `1a84604`/`5216c33`, and the full
+  growth run `a623db7`.
 - Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **133
   tests** (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
   (`make test-gpu` also runs the CUDA tests on a card); `make smoke` runs the
@@ -42,6 +44,13 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   rate `1.78e-4` from base `3e-4` and training factor `0.5946`.
   The P0 follow-up fixes (gate-best persistence, live-save `lr`, and
   `live_steps` continuity) are committed and verified on Dragon.
+- Release `v0.2.0-mirror` (2026-10-22): this commit is the checkpoint for the
+  selective backport and the fork-only live/ingestion/retention work above.
+  Serve-time growth remains opt-in and experimental.
+- Scope decision (2026-10-22): the fork's self-improvement is
+  **operator-assisted maintenance**, not autonomous code modification. The
+  model may learn, ingest, refresh its self-model, and use scoped tools; code
+  changes are reviewed, tested, and committed by an operator.
 - Documentation rule: reconcile `HANDOFF.md`, `DEVPLAN.local.md`, `UPSTREAM.md`,
   and `CHANGELOG.md` at the end of every iteration, before the next one starts.
 - Single-writer enforcement (2026-10-22): `minagi/writer_lock.py` locks a
@@ -124,25 +133,16 @@ and one learning step before trusting a run.
 
 ## Backlog
 
-Ordered by risk to the next iteration:
+- **P2 — Controlled live-learning efficacy run.** Next on Dragon: a fresh copy,
+  a 2–4 hour gated ingest/live stream with growth off, and the retention log.
+  Acceptance: no material held-out degradation, per-domain behavior recorded,
+  and a clean restart.
+- **Deferred:** growth-policy tuning, a full upstream `aa9d53f` sync, and
+  autonomous code modification.
+- **Orin:** short 10–15 turn checks only; Dragon owns long runs.
 
-- **P1 upstream decision.** Compare the remaining `aa9d53f` API port against
-  the value of lane scheduling, paged newborn rates, and performance changes.
-- **P1 operational hardening.** Done 2026-10-22: writers take an advisory
-  per-directory lock; retention rows carry their held-out instrument and start
-  a new baseline when it changes; the P0 restart accounting is verified.
-- **Orin disposition: short checks only.** Do not target Orin for long or
-  unattended gate/replay soaks; use Dragon.
-- **Upstream decision: stay selective.** No full `aa9d53f` sync now. The
-  remaining work is lane scheduling, paged newborn rates, and performance-only
-  code; revisit only if a concrete capability needs it.
-- **Growth calibration.** Done: bounded 174 -> 179 and full 174 -> 226 runs
-  both grew cleanly, but the full run worsened held-out by +0.1690 and produced
-  no eligible prune. Serve-time growth remains opt-in/experimental.
-- **Operational hardening.** The `live_steps` restart path, single-writer
-  enforcement, and retention instrument migration are done.
-- **Scope decision.** Decide whether “improve the codebase itself” is a real
-  autonomous goal or an operator-assisted maintenance workflow.
+Settled 2026-10-22: upstream stays selective; growth is opt-in; codebase
+improvement is operator-assisted.
 
 Done on this machine: the `ce31731` sync (rebased `hardening`, dropped the
 superseded text-probe patch, re-exported `patches/`, replayed scaffolding);
