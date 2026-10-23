@@ -58,10 +58,14 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   17.8 min, normal LR, 174 -> 179 experts (+5) with no prune; held-out
   `0.7706 -> 0.8913` (+0.1207, inside 2 SE). Used `--prune-survival 400000`
   for the bounded run.
-- Full default-survival growth run **in progress** since 2026-10-22 on Dragon
-  (PID `9113`): fresh 174-expert copy, 104.28M-character corpus, chunk/context
-  `2048/4096`, normal LR `3e-4`, growth every 2M chars, survival 100M chars.
-  First growth was 174 -> 175 at 3.4 min (~10k chars/s, so roughly 3–5 hours).
+- Full default-survival growth run **completed** 2026-10-22 on Dragon:
+  104.30M characters, 573.9 min, chunk/context `2048/4096`, normal LR `3e-4`.
+  174 -> 226 experts (+52), saved at 6.16 GB in 226-expert weights.
+  Held-out `0.7465 +/-0.0557 -> 0.9155 +/-0.0882` (+0.1690; material, just
+  inside 2 SE). **No prune fired:** at the final check the only expert below
+  the gate threshold was a newborn with age 0, so none were eligible. The
+  prune path is covered by the soak tests, not by this run. Decision:
+  `serve --grow-every` stays opt-in and experimental.
   Artifacts: `/home/jg/aa9d-calib/full-growth-{weights,corpus,logs}`.
 - P0 fresh-baseline soak (2026-10-22): 80 turns / 23 live steps on a fresh copy
   of the 174-expert checkpoint at `9a02281`; three `improved` gate readings,
@@ -132,9 +136,9 @@ Ordered by risk to the next iteration:
 - **Upstream decision: stay selective.** No full `aa9d53f` sync now. The
   remaining work is lane scheduling, paged newborn rates, and performance-only
   code; revisit only if a concrete capability needs it.
-- **Growth calibration.** The bounded run exercised growth at normal LR
-  (174 -> 179, no prune); the full default-survival run is in progress on
-  Dragon. Decide whether serve-time growth stays experimental when it lands.
+- **Growth calibration.** Done: bounded 174 -> 179 and full 174 -> 226 runs
+  both grew cleanly, but the full run worsened held-out by +0.1690 and produced
+  no eligible prune. Serve-time growth remains opt-in/experimental.
 - **Operational hardening.** The `live_steps` restart path, single-writer
   enforcement, and retention instrument migration are done.
 - **Scope decision.** Decide whether “improve the codebase itself” is a real
@@ -150,7 +154,7 @@ scoped tool registry and receipt ledger, the retention log/dashboard, the
 fault-injection soak, and its then-102-test suite; upstream PR #32 (Windows UTF-8
 logs, direct plot spawns, retrying checkpoint replace) integrated with the
 fork's manifest writer at `74bec51`; and this documentation pass. The suite is
-now 126 tests. The selective `aa9d53f` backport (live rate/manifest, shared
+now 133 tests. The selective `aa9d53f` backport (live rate/manifest, shared
 trunk/pool split, spread whole-block held-out with level banners) is merged at
 `9a02281` and validated on Dragon. P0 soak accounting is closed.
 

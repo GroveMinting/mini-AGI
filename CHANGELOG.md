@@ -107,7 +107,17 @@ Fork-only additions. These are not upstream features.
 - The fork is now maintained directly. Upstream has not been merging community
   PRs, so fixes and features land on `main`; upstream PR #34 was closed and
   upstream PR #32 is carried locally.
-- The suite is now **126 tests** (4 skipped on CPU; 3 CUDA-gated).
+- The suite is now **133 tests** (4 skipped on CPU; 3 CUDA-gated).
+
+### Measured
+
+- Full default-survival growth validation on Dragon: 104.30M characters,
+  174 -> 226 experts (+52), 6.16 GB weights, no crash. Held-out rose from
+  `0.7465 +/-0.0557` to `0.9155 +/-0.0882` (+0.1690, just inside 2 SE).
+  No prune fired because no expert over the survival age was below the gate
+  threshold; the only silent expert was a newborn at age 0. Serve-time growth
+  therefore remains **opt-in and experimental**; prune deletion is still
+  covered by the fault-injection soak, not by this run.
 
 ## [v0.1.2-mirror] — 2026-10-14
 
