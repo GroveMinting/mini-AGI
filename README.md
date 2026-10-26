@@ -1,5 +1,17 @@
 # mini-AGI
 
+[![CI](https://github.com/GroveMinting/mini-AGI/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/GroveMinting/mini-AGI/actions/workflows/tests.yml)
+[![Tag](https://img.shields.io/github/v/tag/GroveMinting/mini-AGI?sort=semver&label=tag)](https://github.com/GroveMinting/mini-AGI/releases/tag/v0.2.0-mirror)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Target: 8 GB VRAM](https://img.shields.io/badge/target-8%20GB%20VRAM-6F42C1)](README.md#gpu-support)
+[![Patchset: 7 correctness fixes](https://img.shields.io/badge/patchset-7%20correctness%20fixes-B42318)](HARDENING.md)
+[![Upstream: selective / ce31731](https://img.shields.io/badge/upstream-selective%20%2F%20ce31731-0A66C2)](UPSTREAM.md)
+[![Live learning: gated](https://img.shields.io/badge/live%20learning-gated-2E7D32)](README.md#learning-from-a-conversation)
+[![Growth: experimental](https://img.shields.io/badge/growth-experimental-7B1FA2)](README.md#how-growth-and-pruning-work)
+
+**Continual single-stream learning · disk-paged mixture of experts · gated live updates · selective upstream hardening**
+
+> [!IMPORTANT]
 > **Unofficial hardening mirror.** This is a fork of
 > [`volotat/mini-AGI`](https://github.com/volotat/mini-AGI) that tracks upstream
 > and carries a small set of correctness patches not yet merged there. It is not
