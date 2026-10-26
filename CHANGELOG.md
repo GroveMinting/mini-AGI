@@ -7,6 +7,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Scheduled CI is now `fork-integrity`: it tests `main` and `hardening` as
+  shipped, reports upstream drift without rebasing, and only attempts a
+  latest-upstream rebase on manual dispatch. This stops fork-only feature/docs
+  commits from being replayed onto upstream and avoids treating expected patch
+  drift as a failed sync.
+
 ## [v0.2.0-mirror] — 2026-10-22
 
 Selective `aa9d53f` backport plus fork-only live-serving, ingestion,

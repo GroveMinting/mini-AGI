@@ -30,6 +30,12 @@ below.)
 
 ### 0001 — dry reads must not touch the source checkpoint
 
+> **Pinning note (2026-10-26).** Upstream `8f74c58` rewrote `minagi/paged.py`
+> with write-behind paging and `uid`-named expert files. This patch is still
+> valid against the pinned base `ce31731`, but a latest-upstream rebase
+> conflicts in that file. Do not force it; forward-port the overlay/write-path
+> and delete behavior when a real sync is scheduled.
+
 `train.py read` without `--save` still trains in memory. Previously a dirty
 expert evicted from a full RAM cache was written back into the source
 `weights/` directory while the trunk, routers, optimiser bundle and manifest

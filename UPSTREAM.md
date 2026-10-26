@@ -28,18 +28,25 @@ writer.
 see the bottom of [`HARDENING.md`](HARDENING.md).
 
 The upstream mirror branch is at `95e901e`; upstream `main` has since advanced
-to `aa9d53f` ("optimization work + cropped evaluation fix"). A selective
-backport of its high-value pieces was merged into `main` at `9a02281`: live rate
-restoration, shared trunk/pool splitting, and spread whole-block held-out
-evaluation with level migration. The lane scheduler, paged newborn-rate
-optimisation, and performance-only changes are deliberately not ported; a full
-`aa9d53f` sync still needs a real port of the `serve.py`/`LiveLearner` API.
+to `8f74c58` (2026-10-23, "benchmarking scripts"). A selective backport of the
+`aa9d53f` pieces was merged into `main` at `9a02281`: live rate restoration,
+shared trunk/pool splitting, and spread whole-block held-out evaluation with
+level migration. The lane scheduler, paged newborn-rate optimisation, and
+performance-only changes are deliberately not ported; a full sync would need a
+real port of the `serve.py`/`LiveLearner` API and the paging changes.
 
 **Decision (2026-10-22): stay selective.** The fork will not do a full
-`aa9d53f` sync now. The remaining pieces are primarily a behavior-changing lane
+upstream sync now. The remaining pieces are primarily a behavior-changing lane
 scheduler, paged newborn-rate optimisation, and performance-only work; the
 fork's live/held-out path already carries the high-value fixes. Revisit this
 only if a concrete capability depends on the remaining upstream API.
+
+**Drift check (2026-10-26).** Upstream `8f74c58` changed `minagi/paged.py`
+(write-behind paging and `uid`-named expert files). Patch 0001 still targets the
+pinned base `ce31731`; rebasing `hardening` onto latest upstream currently
+conflicts in that file. The scheduled `fork-integrity` workflow reports this as
+a warning and does not rebase. Any future sync must review and forward-port
+patch 0001 first.
 
 ## Branch model
 
@@ -71,6 +78,12 @@ make sync          # or: scripts/sync-upstream.sh
 onto it, re-exports `patches/`, and runs the CPU test suite. If a patch no longer
 applies it stops and tells you, rather than forcing a broken tree. Review the
 result, then push.
+
+The scheduled `fork-integrity` workflow does **not** run `make sync`. It tests
+`main` and `hardening` as shipped, reports the upstream SHA and commits-behind
+count in the job summary, and emits a warning when upstream has moved. A manual
+dispatch with `check_upstream=true` performs the latest-upstream rebase on
+`hardening` only, where a conflict is an intentional review signal.
 
 The script finds the upstream remote automatically: an `upstream` remote if you
 have one, otherwise any remote whose URL points at `volotat/mini-AGI`. Override

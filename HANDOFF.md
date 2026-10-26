@@ -19,9 +19,10 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
 
 - Upstream synced: `volotat/mini-AGI` @ `ce31731`, mirror tag `upstream-20261014`
   (previous checkpoint `60f7ae3` kept as `upstream-20261014-1`). The mirror
-  branch is at `95e901e`; upstream `main` has advanced to `aa9d53f`. A full
-  sync is not planned; its `serve.py`/`LiveLearner` API would need a real port
-  only if the selective decision changes.
+  branch is at `95e901e`; upstream `main` has advanced to `8f74c58` (latest
+  observed, not synced). A full sync is not planned; patch 0001 currently
+  conflicts with upstream's paged write-behind changes, so a future sync needs
+  a reviewed forward-port first.
 - `main` is at the `v0.2.0-mirror` release checkpoint. It carries upstream
   PR #32 (Windows runtime fixes), the selective `aa9d53f` backport, and the
   fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
@@ -91,7 +92,9 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   features and are not in the exported `patches/` series. The exported series is
   `upstream..hardening` in apply order; regenerate it with `make patches` after
   rebasing.
-- CI: `tests` on every push; scheduled `upstream-sync` dry-run.
+- CI: `tests` on every push; scheduled `fork-integrity` tests `main` and
+  `hardening`, reports upstream drift as a warning, and rebases only on manual
+  dispatch. It does not pull upstream automatically.
 
 The patch list and rationale live in [`HARDENING.md`](HARDENING.md); the changelog
 is [`CHANGELOG.md`](CHANGELOG.md).

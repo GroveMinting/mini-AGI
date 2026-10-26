@@ -1,39 +1,80 @@
-# Weekly dry-run: rebase the patchset onto current upstream and run the tests.
-# If a patch no longer applies, this job fails and GitHub notifies. It does not
-# push anything - run `make sync` locally to update the mirror.
+# Weekly fork-integrity check. This does NOT rebase onto latest upstream.
 #
-# Note: scheduled workflows are disabled by default on forks; enable them in the
-# Actions tab, or trigger this manually with "Run workflow".
-name: upstream-sync
+# The fork is maintained selectively: upstream may be ahead, but its changes are
+# reviewed before any sync. The scheduled run therefore tests the two branches
+# we actually ship (main and hardening), reports how far upstream has moved, and
+# leaves the decision to a person. A manual dispatch can request the old
+# rebase check against latest upstream; a conflict there is intentional until
+# the affected patch is forward-ported.
+name: fork-integrity
 
 on:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+    inputs:
+      check_upstream:
+        description: "Rebase hardening onto latest upstream (manual review; may conflict)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
-  rebase-dry-run:
+  test:
+    name: tests (${{ matrix.branch }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [main, hardening]
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ matrix.branch }}
           fetch-depth: 0
+
       - name: Add upstream and fetch it
         run: |
           git remote add upstream https://github.com/volotat/mini-AGI
           git fetch upstream main
-      - name: Rebase patchset onto upstream (dry run)
+
+      - name: Report upstream position
+        if: matrix.branch == 'hardening'
+        run: |
+          upstream_sha=$(git rev-parse --short upstream/main)
+          behind=$(git rev-list --count HEAD..upstream/main)
+          branch_sha=$(git rev-parse --short HEAD)
+          {
+            echo "### Fork patchset"
+            echo ""
+            echo "- Branch: \`${{ matrix.branch }}\` at \`$branch_sha\`"
+            echo "- Latest upstream: \`$upstream_sha\`"
+            echo "- Commits behind upstream: \`$behind\`"
+            echo "- The scheduled check does not rebase; sync is manual."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$behind" -gt 0 ]; then
+            echo "::warning title=Upstream drift::$behind upstream commit(s) are ahead; not rebasing automatically"
+          fi
+
+      - name: Rebase hardening onto latest upstream (manual only)
+        if: matrix.branch == 'hardening' && github.event_name == 'workflow_dispatch' && inputs.check_upstream
         run: |
           git config user.email ci@users.noreply.github.com
           git config user.name ci
           git rebase upstream/main
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install deps (CPU torch)
         run: |
           python -m pip install -U pip
           python -m pip install numpy pyyaml
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Run tests on the rebased tree
+
+      - name: Run tests on the selected tree
         run: python -m unittest discover -s tests -v
