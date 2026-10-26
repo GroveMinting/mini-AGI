@@ -23,13 +23,13 @@ It is not affiliated with, endorsed by, or a replacement for upstream.
   observed, not synced). A full sync is not planned; patch 0001 currently
   conflicts with upstream's paged write-behind changes, so a future sync needs
   a reviewed forward-port first.
-- `main` is at the `v0.2.0-mirror` release checkpoint. It carries upstream
-  PR #32 (Windows runtime fixes), the selective `aa9d53f` backport, and the
-  fork-only live-serving, ingestion, self-model, scoped-tool, retention, and
-  soak additions documented in [README.md](README.md). Recent closes:
-  gate/lr persistence `e1816d0`, live-step continuity `5051438`, growth detach
-  `65c3197`, one-writer/retention migration `1a84604`/`5216c33`, and the full
-  growth run `a623db7`.
+- `main` is at `49026bd`, one post-release CI/docs commit after the
+  `v0.2.0-mirror` tag (`514da52`). It carries upstream PR #32 (Windows runtime
+  fixes), the selective `aa9d53f` backport, and the fork-only live-serving,
+  ingestion, self-model, scoped-tool, retention, and soak additions documented
+  in [README.md](README.md). Recent closes: gate/lr persistence `e1816d0`,
+  live-step continuity `5051438`, growth detach `65c3197`, one-writer/retention
+  migration `1a84604`/`5216c33`, and the full growth run `a623db7`.
 - Patchset: **7 patches**, tracked as `patches/*.patch`; test suite: **133
   tests** (4 skipped on CPU; 3 CUDA-gated). `make test` is green on CPU
   (`make test-gpu` also runs the CUDA tests on a card); `make smoke` runs the
